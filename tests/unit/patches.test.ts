@@ -8,8 +8,8 @@ import { assessDirectory, type Analyzer } from '../../src/modules/assessment/ass
 import { writeNodeFixture, writePhpFixture } from '../helpers/fixtures.js';
 
 const ALL = ['patch-dependencies', 'upgrade-runtime', 'remove-committed-env', 'add-packaging'];
-const npm = (name: string, from: string, to: string): DependencyFix => ({ ecosystem: 'npm', name, from, to });
-const pkgist = (name: string, from: string, to: string): DependencyFix => ({ ecosystem: 'Packagist', name, from, to });
+const npm = (name: string, from: string, to: string): DependencyFix => ({ ecosystem: 'npm', name, from, to, urgent: false, dev: false });
+const pkgist = (name: string, from: string, to: string): DependencyFix => ({ ecosystem: 'Packagist', name, from, to, urgent: false, dev: false });
 
 function run(files: Record<string, string>, stageIds: string[], fixes: DependencyFix[] = [], stack: 'node' | 'php' | 'mixed' | 'unknown' = 'node'): FilePatch[] {
   return generatePatches({ stack, files, fixes, stageIds });
@@ -94,7 +94,7 @@ describe('remove-committed-env', () => {
     expect(patches.map((p) => [p.path, p.after])).toEqual([
       ['.env', null],
       ['.env.production', null],
-      ['.gitignore', 'node_modules\n.env\n']
+      ['.gitignore', 'node_modules\n.env\n.env.*\n!.env.example\n']
     ]);
     expect(patches[0].reason).toContain('rotate');
     const next = applyPatches(files, patches);
@@ -105,7 +105,13 @@ describe('remove-committed-env', () => {
   it('creates .gitignore when absent and ignores nested env files', () => {
     const patches = run({ '.env.local': 'x', 'sub/.env': 'y' }, ['remove-committed-env']);
     expect(patches.map((p) => p.path)).toEqual(['.env.local', '.gitignore']);
-    expect(patches[1]).toMatchObject({ before: undefined, after: '.env\n' });
+    expect(patches[1]).toMatchObject({ before: undefined, after: '.env\n.env.*\n!.env.example\n' });
+  });
+
+  it('adds only the missing ignore lines', () => {
+    const patches = run({ '.env': 'x', '.gitignore': '.env\n!.env.example' }, ['remove-committed-env']);
+    expect(patches[1].after).toBe('.env\n!.env.example\n.env.*\n');
+    expect(run({ '.env': 'x', '.gitignore': '.env\n.env.*\n!.env.example\n' }, ['remove-committed-env']).map((p) => p.path)).toEqual(['.env']);
   });
 
   it('does nothing without env files', () => {

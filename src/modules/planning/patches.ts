@@ -15,6 +15,7 @@ const MAX_FILE_BYTES = 256 * 1024;
 const NODE_TARGET = 22;
 const PHP_TARGET = '8.4';
 const STAGE_ORDER = ['patch-dependencies', 'upgrade-runtime', 'remove-committed-env', 'add-packaging'];
+const IGNORE_LINES = ['.env', '.env.*', '!.env.example'];
 const CI_PATH = '.github/workflows/ci.yml';
 
 // ---- JSON text helpers: edit one value without re-serialising the file ----
@@ -194,9 +195,11 @@ function envPatches(input: PatchInput): Draft[] {
   if (out.length === 0) return out;
   const ignore = files['.gitignore'];
   if (ignore !== undefined && Buffer.byteLength(ignore) > MAX_FILE_BYTES) return out;
-  if (ignore === undefined || !ignore.split(/\r?\n/).some((l) => l.trim() === '.env')) {
+  const present = new Set((ignore ?? '').split(/\r?\n/).map((l) => l.trim()));
+  const missing = IGNORE_LINES.filter((l) => !present.has(l));
+  if (missing.length > 0) {
     const base = ignore === undefined || ignore === '' || ignore.endsWith('\n') ? (ignore ?? '') : `${ignore}\n`;
-    out.push({ path: '.gitignore', before: ignore, after: `${base}.env\n`, reason: 'Ignore .env so environment files are not committed again.' });
+    out.push({ path: '.gitignore', before: ignore, after: `${base}${missing.join('\n')}\n`, reason: 'Ignore environment files so they are not committed again.' });
   }
   return out;
 }
