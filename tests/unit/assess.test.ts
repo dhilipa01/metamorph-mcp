@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assessDirectory, type Analyzer } from '../../src/modules/assessment/assess.js';
 import { writeNodeFixture, writePhpFixture } from '../helpers/fixtures.js';
+import { writeModernPhpFixture } from '../helpers/fixtures-modern.js';
 
 const TODAY = new Date('2026-10-30T00:00:00Z');
 const dirs: string[] = [];
@@ -62,6 +63,31 @@ describe('assessDirectory: legacy PHP fixture', () => {
     expect(a.dependencies.checked).toBe(2);
     expect(a.dependencies.approximateVersions).toBe(false);
     expect(a.score.overall).toBeLessThan(60);
+  });
+});
+
+// OSV stand-in for "no known advisories", matching the live check of the pinned modern versions.
+const cleanOsv: Analyzer = async (pkgs) => pkgs.map((p) => ({ package: p, affected: false, findings: [], truncated: false }));
+
+describe('assessDirectory: modernized PHP shop', () => {
+  it('scores 100 with no findings above info once every issue is fixed', async () => {
+    const dir = await temp();
+    await writeModernPhpFixture(dir);
+    const a = await assessDirectory(dir, { analyze: cleanOsv, today: TODAY });
+    expect(a.topFindings.filter((f) => f.severity !== 'info')).toEqual([]);
+    expect(a.score.overall).toBe(100);
+    expect(a.runtime.declared).toBe('^8.4');
+    expect(a.hosting).toEqual(expect.arrayContaining(['docker', 'github-actions']));
+  });
+
+  it('the legacy shop scores far lower than the modernized one', async () => {
+    const legacy = await temp();
+    await writePhpFixture(legacy);
+    const before = await assessDirectory(legacy, { analyze: fakeOsv, today: TODAY });
+    const modern = await temp();
+    await writeModernPhpFixture(modern);
+    const after = await assessDirectory(modern, { analyze: cleanOsv, today: TODAY });
+    expect(after.score.overall - before.score.overall).toBeGreaterThan(70);
   });
 });
 
