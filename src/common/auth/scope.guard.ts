@@ -8,6 +8,8 @@ const keys = () => (table ??= parseKeyTable(process.env));
 export function scopeGuard(required: Scope) {
   return class ScopeGuard implements Guard {
     async canActivate(context: ExecutionContext): Promise<boolean> {
+      // Local STDIO has no HTTP headers. METAMORPH_AUTH=off is for local development ONLY; never set it on a deployed host.
+      if (process.env.METAMORPH_AUTH === 'off') return true;
       const result = authorize(extractKey(context.metadata as Record<string, unknown> | undefined), required, keys());
       if (!result.ok) {
         context.logger.warn('auth denied', { tool: context.toolName ?? '', status: result.status, required });
