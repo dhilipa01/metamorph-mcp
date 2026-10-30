@@ -2,6 +2,7 @@ import { McpApp, Module, ConfigModule } from '@nitrostack/core';
 import { SystemHealthCheck } from './health/system.health.js';
 import { SpikeModule } from './modules/spike/spike.module.js'; // ponytail: throwaway, remove after G1
 import { IntakeModule } from './modules/intake/intake.module.js';
+import { AssessmentModule } from './modules/assessment/assessment.module.js';
 
 /**
  * Root Application Module
@@ -25,7 +26,8 @@ import { IntakeModule } from './modules/intake/intake.module.js';
   imports: [
     ConfigModule.forRoot(),
     SpikeModule, // ponytail: throwaway probe, remove after G1
-    IntakeModule
+    IntakeModule,
+    AssessmentModule
   ],
   providers: [
     // Health Checks
