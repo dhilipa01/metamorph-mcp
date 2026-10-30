@@ -14,13 +14,13 @@
     "@nitrostack/core": "^1.1.2",
     "@nitrostack/widgets": "^1.0.10",
     "next": "^14.2.5",
-    "react": "^18.3.1",
+    "react": "^19.3.1",
     "react-dom": "^18.3.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/react": "^18",
+    "@types/react": "^19",
     "@types/react-dom": "^18",
     "typescript": "^5"
   }
