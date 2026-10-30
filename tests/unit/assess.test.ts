@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assessDirectory, type Analyzer } from '../../src/modules/assessment/assess.js';
+import { assessDirectory, assessFull, type Analyzer } from '../../src/modules/assessment/assess.js';
 import { writeNodeFixture, writePhpFixture } from '../helpers/fixtures.js';
 import { writeModernPhpFixture } from '../helpers/fixtures-modern.js';
 
@@ -106,5 +106,92 @@ describe('assessDirectory: edge cases', () => {
     const b = await assessDirectory(dir, { analyze: fakeOsv, today: TODAY });
     expect(b.assessmentId).toBe(a.assessmentId);
     expect(b.score).toEqual(a.score);
+  });
+});
+
+type Fx = { fixed: string[]; urgent?: boolean };
+const finding = (x: Fx, i: number) => ({ id: `GHSA-test-${i}`, aliases: [], severity: 'high' as const, summary: 's', fixedVersions: x.fixed, urgent: x.urgent ?? false, urgentReasons: [] });
+const analyzerFor = (spec: Record<string, Fx[] | null>): Analyzer => async (pkgs) =>
+  pkgs.map((p) => {
+    const fx = spec[p.name];
+    return { package: p, affected: fx != null, truncated: false, findings: (fx ?? []).map(finding) };
+  });
+
+describe('assessFull', () => {
+  it('picks the highest fixed version across findings', async () => {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    const analyze = analyzerFor({
+      lodash: [{ fixed: ['4.17.19'] }, { fixed: ['4.17.21'] }],
+      express: [{ fixed: ['4.17.21'] }, { fixed: ['4.18.0'] }]
+    });
+    const { fixes } = await assessFull(dir, { analyze, today: TODAY });
+    expect(fixes.find((f) => f.name === 'lodash')).toMatchObject({ ecosystem: 'npm', from: '4.17.15', to: '4.17.21', dev: false });
+    expect(fixes.find((f) => f.name === 'express')?.to).toBe('4.18.0');
+  });
+
+  it('compares versions numerically, not as strings', async () => {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    const analyze = analyzerFor({ lodash: [{ fixed: ['4.9.0'] }, { fixed: ['4.10.0'] }] });
+    const { fixes } = await assessFull(dir, { analyze, today: TODAY });
+    expect(fixes.find((f) => f.name === 'lodash')?.to).toBe('4.10.0');
+  });
+
+  it('excludes non-affected packages and affected ones with no fixed version', async () => {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    const analyze = analyzerFor({ lodash: [{ fixed: ['4.17.21'] }], express: [{ fixed: [] }], request: null });
+    const { fixes } = await assessFull(dir, { analyze, today: TODAY });
+    expect(fixes.map((f) => f.name)).toEqual(['lodash']);
+  });
+
+  it('flags urgent if any finding is urgent, and sorts urgent first then by name', async () => {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    const analyze = analyzerFor({
+      express: [{ fixed: ['4.18.0'] }],
+      lodash: [{ fixed: ['4.17.20'] }, { fixed: ['4.17.21'], urgent: true }],
+      request: [{ fixed: ['2.88.3'], urgent: true }]
+    });
+    const { fixes } = await assessFull(dir, { analyze, today: TODAY });
+    expect(fixes.map((f) => [f.name, f.urgent])).toEqual([['lodash', true], ['request', true], ['express', false]]);
+  });
+
+  it('marks devDependencies as dev', async () => {
+    const dir = await temp();
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'x', dependencies: { lodash: '4.17.15' }, devDependencies: { mocha: '1.0.0' } }));
+    const analyze = analyzerFor({ lodash: [{ fixed: ['4.17.21'] }], mocha: [{ fixed: ['2.0.0'] }] });
+    const { fixes } = await assessFull(dir, { analyze, today: TODAY });
+    expect(fixes.find((f) => f.name === 'mocha')).toMatchObject({ dev: true, from: '1.0.0', to: '2.0.0' });
+    expect(fixes.find((f) => f.name === 'lodash')?.dev).toBe(false);
+  });
+
+  it('returns every finding, not just the top 10', async () => {
+    const dir = await temp();
+    await writePhpFixture(dir);
+    const { assessment, findings } = await assessFull(dir, { analyze: fakeOsv, today: TODAY });
+    expect(assessment.topFindings).toHaveLength(10);
+    expect(findings.length).toBeGreaterThan(10);
+    expect(findings).toHaveLength(assessment.findingCount);
+  });
+
+  it('exposes key file contents', async () => {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    const { files } = await assessFull(dir, { analyze: fakeOsv, today: TODAY });
+    expect(Object.keys(files)).toEqual(expect.arrayContaining(['package.json', 'package-lock.json']));
+    expect(files['package.json']).toContain('legacy-node-orders');
+  });
+
+  it('assessDirectory equals assessFull().assessment', async () => {
+    const node = await temp();
+    await writeNodeFixture(node);
+    const php = await temp();
+    await writePhpFixture(php);
+    for (const dir of [node, php]) {
+      const opts = { analyze: fakeOsv, today: TODAY };
+      expect(await assessDirectory(dir, opts)).toEqual((await assessFull(dir, opts)).assessment);
+    }
   });
 });

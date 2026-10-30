@@ -25,6 +25,23 @@ export interface Assessment {
   truncated: boolean;
 }
 
+// types.ts does not define this yet, so it lives here until the shared contract adds it.
+export interface DependencyFix {
+  ecosystem: PackageRef['ecosystem'];
+  name: string;
+  from: string;
+  to: string;
+  urgent: boolean;
+  dev: boolean;
+}
+
+export interface FullAssessment {
+  assessment: Assessment;
+  findings: Finding[];
+  fixes: DependencyFix[];
+  files: Record<string, string>;
+}
+
 const MAX_CHECKED = 50;
 const OSV_TO_FINDING: Record<OsvSeverity, Severity> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', unknown: 'medium' };
 const RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
@@ -72,7 +89,36 @@ function groupByRule(findings: Finding[]): Finding[] {
   );
 }
 
+// Numeric compare by dot/dash segments; missing or non-numeric segments count as 0.
+export function cmpVersion(a: string, b: string): number {
+  const seg = (v: string) => v.split(/[.-]/).map((x) => (/^\d+$/.test(x) ? Number(x) : 0));
+  const pa = seg(a);
+  const pb = seg(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+function dependencyFixes(analyses: PackageAnalysis[], dev: Map<string, boolean>): DependencyFix[] {
+  const out: DependencyFix[] = [];
+  for (const a of analyses) {
+    if (!a.affected) continue;
+    let to: string | undefined;
+    for (const f of a.findings) for (const v of f.fixedVersions) if (to === undefined || cmpVersion(v, to) > 0) to = v;
+    if (to === undefined) continue;
+    const { ecosystem, name, version } = a.package;
+    out.push({ ecosystem, name, from: version, to, urgent: a.findings.some((f) => f.urgent), dev: dev.get(`${ecosystem}:${name}`) === true });
+  }
+  return out.sort((x, y) => Number(y.urgent) - Number(x.urgent) || x.name.localeCompare(y.name));
+}
+
 export async function assessDirectory(dir: string, opts: { analyze?: Analyzer; today?: Date } = {}): Promise<Assessment> {
+  return (await assessFull(dir, opts)).assessment;
+}
+
+export async function assessFull(dir: string, opts: { analyze?: Analyzer; today?: Date } = {}): Promise<FullAssessment> {
   const today = opts.today ?? new Date();
   const analyze: Analyzer = opts.analyze ?? ((pkgs) => analyzePackages(pkgs));
   const kf = await readKeyFiles(dir);
@@ -102,7 +148,11 @@ export async function assessDirectory(dir: string, opts: { analyze?: Analyzer; t
   for (const d of phpInv?.deps ?? []) candidates.push({ ref: toRefs([d], 'Packagist')[0], dev: d.dev, approximate: d.approximate });
   candidates.sort((a, b) => Number(a.dev) - Number(b.dev) || Number(a.approximate) - Number(b.approximate));
   const checked = candidates.slice(0, MAX_CHECKED);
-  checked.forEach((x) => approx.set(`${x.ref.ecosystem}:${x.ref.name}`, x.approximate));
+  const devByKey = new Map<string, boolean>();
+  checked.forEach((x) => {
+    approx.set(`${x.ref.ecosystem}:${x.ref.name}`, x.approximate);
+    devByKey.set(`${x.ref.ecosystem}:${x.ref.name}`, x.dev);
+  });
 
   let analyses: PackageAnalysis[] = [];
   if (checked.length > 0) {
@@ -119,7 +169,7 @@ export async function assessDirectory(dir: string, opts: { analyze?: Analyzer; t
   const vulnerable = analyses.filter((a) => a.affected).length;
   const urgent = analyses.filter((a) => a.findings.some((f) => f.urgent)).length;
 
-  return {
+  const assessment: Assessment = {
     assessmentId: canonicalHash({ stack, deps: checked.map((x) => `${x.ref.name}@${x.ref.version}`), findings: sorted.map((f) => f.id) }).slice(0, 16),
     stack,
     runtime: { declared: nodeInv?.declaredEngine ?? phpInv?.phpConstraint, minMajor: nodeInv?.minNodeMajor, source: nodeInv?.runtimeSource },
@@ -138,4 +188,5 @@ export async function assessDirectory(dir: string, opts: { analyze?: Analyzer; t
     findingCount: sorted.length,
     truncated: kf.truncated
   };
+  return { assessment, findings: sorted, fixes: dependencyFixes(analyses, devByKey), files: c };
 }
