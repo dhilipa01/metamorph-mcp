@@ -1,21 +1,7 @@
 // Deterministic file patches for the migration stages, plus a small unified-diff writer. Pure functions: no I/O.
 // Only repo-root files (and .github/workflows/ci.yml) are edited, and only through the `files` map the caller passes in.
 
-// Shared contract shapes. Declared here until the assessment types module exports them; structurally identical.
-export interface DependencyFix {
-  ecosystem: 'npm' | 'Packagist';
-  name: string;
-  from: string;
-  to: string;
-}
-
-export interface FilePatch {
-  path: string;
-  stageId: string;
-  reason: string;
-  before?: string; // undefined for new files
-  after: string | null; // null deletes the file
-}
+import type { DependencyFix, FilePatch } from '../assessment/types.js';
 
 export interface PatchInput {
   stack: 'node' | 'php' | 'mixed' | 'unknown';

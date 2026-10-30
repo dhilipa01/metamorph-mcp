@@ -7,7 +7,7 @@ import { detectHosting } from './hosting.js';
 import { inventoryNode, nodeFindings, NODE_EOL } from './node-inventory.js';
 import { inventoryPhp, phpFindings, scanPhpSources } from './php-inventory.js';
 import { scoreFindings, topFindings, type Score } from './score.js';
-import type { DepRef, Finding, Severity } from './types.js';
+import type { DependencyFix, DepRef, Finding, Severity } from './types.js';
 
 export type Analyzer = (packages: PackageRef[]) => Promise<PackageAnalysis[]>;
 
@@ -23,16 +23,6 @@ export interface Assessment {
   topFindings: Finding[];
   findingCount: number;
   truncated: boolean;
-}
-
-// types.ts does not define this yet, so it lives here until the shared contract adds it.
-export interface DependencyFix {
-  ecosystem: PackageRef['ecosystem'];
-  name: string;
-  from: string;
-  to: string;
-  urgent: boolean;
-  dev: boolean;
 }
 
 export interface FullAssessment {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildPlan } from '../../src/modules/planning/plan.js';
-import type { DependencyFix } from '../../src/modules/planning/plan.js';
+import type { DependencyFix } from '../../src/modules/assessment/types.js';
 import { scoreFindings } from '../../src/modules/assessment/score.js';
 import type { Category, Finding, Severity } from '../../src/modules/assessment/types.js';
 
@@ -33,7 +33,7 @@ const nodeApp: Finding[] = [
   f('node-commonjs', 'low', 'architecture', 'Move to ES modules'),
 ];
 
-const fix = (name: string, from: string, to: string, urgent = false): DependencyFix => ({ name, from, to, urgent });
+const fix = (name: string, from: string, to: string, urgent = false): DependencyFix => ({ ecosystem: 'npm', name, from, to, urgent, dev: false });
 const ids = (findings: Finding[], goal: 'modernize_all' | 'patch_advisory' | 'upgrade_runtime' = 'modernize_all', fixes: DependencyFix[] = []) =>
   buildPlan({ stack: 'php', findings, fixes, goal }).stages.map((s) => s.id);
 

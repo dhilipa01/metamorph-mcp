@@ -1,39 +1,8 @@
 import { scoreFindings } from '../assessment/score.js';
-import type { Finding } from '../assessment/types.js';
 import { SEVERITY_RANK } from '../assessment/types.js';
+import type { DependencyFix, Finding, Goal, ModernizationPlan, PlanStage, StageKind } from '../assessment/types.js';
 
-// Planning types live here until they are merged into assessment/types.ts.
-export type Goal = 'patch_advisory' | 'upgrade_runtime' | 'modernize_all';
-export type Risk = 'low' | 'medium' | 'high';
-export type StageKind = 'dependencies' | 'runtime' | 'packaging' | 'code';
-
-export interface DependencyFix {
-  name: string;
-  from: string;
-  to: string;
-  urgent?: boolean;
-}
-
-export interface PlanStage {
-  index: number; // 1-based among emitted stages
-  id: string;
-  title: string;
-  kind: StageKind;
-  automated: boolean;
-  risk: Risk;
-  addresses: string[];
-  steps: string[];
-  rollback: string;
-  scoreAfter: number;
-}
-
-export interface ModernizationPlan {
-  stack: 'node' | 'php' | 'mixed' | 'unknown';
-  goal: Goal;
-  scoreBefore: number;
-  scoreAfter: number;
-  stages: PlanStage[];
-}
+type Risk = PlanStage['risk'];
 
 export interface PlanInput {
   stack: ModernizationPlan['stack'];

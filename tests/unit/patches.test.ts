@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { applyPatches, generatePatches, unifiedDiff, type DependencyFix, type FilePatch } from '../../src/modules/planning/patches.js';
+import { applyPatches, generatePatches, unifiedDiff } from '../../src/modules/planning/patches.js';
+import type { DependencyFix, FilePatch } from '../../src/modules/assessment/types.js';
 import { assessDirectory, type Analyzer } from '../../src/modules/assessment/assess.js';
 import { writeNodeFixture, writePhpFixture } from '../helpers/fixtures.js';
 
