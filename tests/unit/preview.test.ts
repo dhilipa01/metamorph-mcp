@@ -92,4 +92,47 @@ describe('buildPreview', () => {
     expect(lines).toHaveLength(402);
     expect(lines[400]).toBe('... diff truncated');
   });
+
+  describe('secret handling', () => {
+    const AWS = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+    const PW = 'hunter2' + 'hunter2';
+    const envText = `AWS_KEY=${AWS}\npassword=${PW}\n`;
+    const envDel = (path: string): FilePatch => ({ path, before: envText, after: null, reason: 'remove', stageId: 'patch-dependencies' });
+
+    it.each(['.env', '.env.production', '.env.local', 'sub/.env', 'apps/api/.env.staging'])('hides the content of %s', (path) => {
+      const p = run([envDel(path)], SECRET);
+      const json = JSON.stringify(p);
+      expect(json).not.toContain(AWS);
+      expect(json).not.toContain(PW);
+      expect(p.diff).toBe(`--- a/${path}\n+++ /dev/null\n(content hidden: env file)\n`);
+      expect(p.note ?? '').not.toContain('redacted');
+    });
+
+    it('hides content of edited env files too', () => {
+      const p = run([{ path: '.env.example', before: envText, after: envText + 'X=1\n', reason: 'edit', stageId: 'patch-dependencies' }], SECRET);
+      expect(p.diff).toBe('--- a/.env.example\n+++ b/.env.example\n(content hidden: env file)\n');
+    });
+
+    it('redacts secret-looking values in other files and notes it', () => {
+      const pkg: FilePatch = { path: 'package.json', before: `{"token":"${AWS}"}\n`, after: '{"token":"x"}\n', reason: 'edit', stageId: 'patch-dependencies' };
+      const p = run([pkg], SECRET);
+      expect(JSON.stringify(p)).not.toContain(AWS);
+      expect(p.diff).toContain('[REDACTED');
+      expect(p.note).toContain('Some values were redacted in this preview.');
+    });
+
+    it('appends the redaction note to an existing note and redacts reasons', () => {
+      const p = run([{ ...edit, reason: `use ${AWS}` }], undefined);
+      expect(p.files[0].reason).not.toContain(AWS);
+      expect(p.note).toMatch(/METAMORPH_TOKEN_SECRET.*Some values were redacted/);
+    });
+
+    it('still shows the .gitignore diff and adds no redaction note', () => {
+      const ign: FilePatch = { path: '.gitignore', before: 'node_modules\n', after: 'node_modules\n.env\n', reason: 'ignore', stageId: 'patch-dependencies' };
+      const p = run([envDel('.env'), ign], SECRET);
+      expect(p.diff).toContain('+.env');
+      expect(p.diff).toContain('--- a/.gitignore');
+      expect(p.note).toBeUndefined();
+    });
+  });
 });
