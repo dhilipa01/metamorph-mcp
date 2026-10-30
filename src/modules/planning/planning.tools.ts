@@ -1,0 +1,115 @@
+import { ToolDecorator as Tool, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { scopeGuard } from '../../common/auth/scope.guard.js';
+import { assessFull } from '../assessment/assess.js';
+import { withRepo } from '../assessment/repo-source.js';
+import type { Goal } from '../assessment/types.js';
+import { generatePatches } from './patches.js';
+import { buildPlan } from './plan.js';
+import { buildPreview } from './preview.js';
+
+const GOALS = ['patch_advisory', 'upgrade_runtime', 'modernize_all'] as const;
+const REPO_DESC = 'Public GitHub repository URL, e.g. https://github.com/owner/repo (a /tree/<branch> link works)';
+const GOAL_DESC = 'What to aim for: patch_advisory (fix vulnerable packages), upgrade_runtime (also move off an end-of-life runtime) or modernize_all (default, everything)';
+const SUB_DESC = 'Optional folder inside the repository, e.g. apps/api';
+
+interface Input {
+  repo_url: string;
+  goal?: Goal;
+  subfolder?: string;
+  stage?: string;
+}
+
+export class PlanningTools {
+  @Tool({
+    name: 'plan_modernization',
+    description:
+      'Build a staged modernization plan for a public GitHub repository: ordered stages (dependency patches, runtime upgrade, removing committed env files, packaging), each with risk, steps, rollback and the projected score. Some stages are automated, others guided. Read-only: nothing is changed. Next step: call preview_changes with an automated stage id.',
+    inputSchema: z.object({
+      repo_url: z.string().min(10).max(300).describe(REPO_DESC),
+      goal: z.enum(GOALS).optional().describe(GOAL_DESC),
+      subfolder: z.string().max(200).optional().describe(SUB_DESC)
+    }),
+    examples: {
+      request: { repo_url: 'https://github.com/owner/legacy-app', goal: 'modernize_all' },
+      response: {
+        assessmentId: 'a1b2c3d4e5f60718',
+        stack: 'node',
+        goal: 'modernize_all',
+        scoreBefore: 52,
+        scoreAfter: 88,
+        stages: [{ index: 1, id: 'patch-dependencies', title: 'Patch vulnerable dependencies', kind: 'dependencies', automated: true, risk: 'low', addresses: ['dep-vulnerable:lodash'], steps: ['Bump lodash 4.17.15 to 4.17.21'], rollback: 'Revert the manifest changes and reinstall from the old lockfile.', scoreAfter: 64 }],
+        hint: 'Call preview_changes with stage set to an automated stage id, for example "patch-dependencies".'
+      }
+    }
+  })
+  @UseGuards(scopeGuard('plan'))
+  async planModernization(input: Input, ctx: ExecutionContext) {
+    const goal = input.goal ?? 'modernize_all';
+    ctx.logger.info('plan_modernization', { goal });
+    const { assessment, plan } = await withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
+      const full = await assessFull(dir);
+      return { assessment: full.assessment, plan: buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal }) };
+    });
+    const automated = plan.stages.find((s) => s.automated);
+    return {
+      assessmentId: assessment.assessmentId,
+      stack: plan.stack,
+      goal: plan.goal,
+      scoreBefore: plan.scoreBefore,
+      scoreAfter: plan.scoreAfter,
+      stages: plan.stages.map((s) => ({
+        index: s.index,
+        id: s.id,
+        title: s.title,
+        kind: s.kind,
+        automated: s.automated,
+        risk: s.risk,
+        addresses: s.addresses.slice(0, 10),
+        steps: s.steps,
+        rollback: s.rollback,
+        scoreAfter: s.scoreAfter
+      })),
+      hint: automated
+        ? `Call preview_changes with stage set to an automated stage id, for example "${automated.id}", to see the exact file changes.`
+        : 'No automated stage applies to this project. Follow the guided steps, then call assess_project to re-scan.'
+    };
+  }
+
+  @Tool({
+    name: 'preview_changes',
+    description:
+      'Preview one stage of the modernization plan: the files that would change and a unified diff, plus a short-lived approval token when the server has one configured. Guided stages return their steps instead of a diff. Read-only: nothing is changed. Use a stage id from plan_modernization.',
+    inputSchema: z.object({
+      repo_url: z.string().min(10).max(300).describe(REPO_DESC),
+      stage: z.string().min(1).max(60).describe('Stage id from plan_modernization, e.g. patch-dependencies'),
+      goal: z.enum(GOALS).optional().describe(GOAL_DESC),
+      subfolder: z.string().max(200).optional().describe(SUB_DESC)
+    }),
+    examples: {
+      request: { repo_url: 'https://github.com/owner/legacy-app', stage: 'patch-dependencies' },
+      response: {
+        stage: { id: 'patch-dependencies', index: 1, title: 'Patch vulnerable dependencies', automated: true, risk: 'low', steps: ['Bump lodash 4.17.15 to 4.17.21'], rollback: 'Revert the manifest changes and reinstall from the old lockfile.', scoreAfter: 64 },
+        automated: true,
+        files: [{ path: 'package.json', action: 'edit', reason: 'Bump vulnerable dependencies to fixed versions.' }],
+        diff: '--- a/package.json\n+++ b/package.json\n@@ -1,3 +1,3 @@\n...',
+        expiresInSeconds: 300
+      }
+    }
+  })
+  @UseGuards(scopeGuard('read'))
+  async previewChanges(input: Input & { stage: string }, ctx: ExecutionContext) {
+    const goal = input.goal ?? 'modernize_all';
+    ctx.logger.info('preview_changes', { goal, stage: input.stage });
+    return withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
+      const { assessment, findings, fixes, files } = await assessFull(dir);
+      const plan = buildPlan({ stack: assessment.stack, findings, fixes, goal });
+      const patches = generatePatches({ stack: assessment.stack, files, fixes, stageIds: [input.stage] });
+      try {
+        return buildPreview({ plan, stageId: input.stage, patches, secret: process.env.METAMORPH_TOKEN_SECRET });
+      } catch (e) {
+        if (!(e instanceof RangeError)) throw e;
+        throw new Error(`${e.message} Call plan_modernization first (with the same goal, "${goal}") and pass one of its stage ids as "stage".`);
+      }
+    });
+  }
+}
