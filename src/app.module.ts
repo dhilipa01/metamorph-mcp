@@ -12,7 +12,7 @@ import { IntakeModule } from './modules/intake/intake.module.js';
 @McpApp({
   module: AppModule,
   server: {
-    name: 'mcp-starter',
+    name: 'metamorph-mcp',
     version: '1.0.0'
   },
   logging: {
