@@ -9,7 +9,7 @@
     "start": "next start -p 3001"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^1.0.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@nitrostack/core": "^1.1.2",
     "@nitrostack/widgets": "^1.0.10",
