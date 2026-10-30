@@ -1,7 +1,7 @@
 import { ToolDecorator as Tool, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
-import { archiveUrl, createWorkdir, extractTarGz, fetchArchive, parseGithubRepo, resolveInside } from '../../common/safe-archive.js';
 import { assessDirectory } from './assess.js';
+import { withRepo } from './repo-source.js';
 
 export class AssessmentTools {
   @Tool({
@@ -19,36 +19,6 @@ export class AssessmentTools {
   })
   @UseGuards(scopeGuard('read'))
   async assessProject(input: { repo_url: string; subfolder?: string }, ctx: ExecutionContext) {
-    let repo: ReturnType<typeof parseGithubRepo>;
-    try {
-      repo = parseGithubRepo(input.repo_url);
-    } catch {
-      throw new Error('Invalid repository URL. Use a public GitHub link like https://github.com/owner/repo.');
-    }
-    ctx.logger.info('assess_project', { owner: repo.owner, repo: repo.repo, ref: repo.ref ?? 'HEAD' });
-
-    const work = await createWorkdir(process.env.METAMORPH_SANDBOX_DIR);
-    try {
-      let archive: Buffer;
-      try {
-        archive = await fetchArchive(archiveUrl(repo.owner, repo.repo, repo.ref));
-      } catch {
-        throw new Error('Could not download the repository. Only public GitHub repositories up to 25 MB are supported; check the URL and branch name.');
-      }
-      try {
-        await extractTarGz(archive, work.dir);
-      } catch {
-        throw new Error('The repository archive could not be unpacked safely (too large, too many files, or unexpected content).');
-      }
-      let root: string;
-      try {
-        root = await resolveInside(work.dir, input.subfolder ?? '');
-      } catch {
-        throw new Error('The subfolder is not valid. Use a path inside the repository, like apps/api.');
-      }
-      return await assessDirectory(root);
-    } finally {
-      await work.cleanup();
-    }
+    return withRepo(input.repo_url, input.subfolder, ctx, (dir) => assessDirectory(dir));
   }
 }
