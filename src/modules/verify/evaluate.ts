@@ -5,6 +5,7 @@
 import type { RunnerSummary } from '../report/report-data.js';
 import { isFinal, type RunInfo, type RunState } from './github-runner.js';
 import type { RunnerResult } from './result.js';
+import { analyzeFindings, summarizeMeasured } from '../scanners/measured.js';
 
 export const MAX_CHECK_ROWS = 25;
 
@@ -123,6 +124,10 @@ export function runnerResultToSummary(input: { patched?: RunnerResult; baseline?
     status: t.ran === 0 ? 'skipped' : t.failed > 0 ? 'failed' : 'passed',
     detail: `${t.ran} ran, ${t.passed} passed, ${t.failed} failed${t.ran === 0 ? ' (no tests found)' : ''}${bt ? bNote(`${bt.ran} ran, ${bt.passed} passed, ${bt.failed} failed`) : ''}`
   });
+  // Measured score and deduplicated findings of the primary run (patched when there is one), plus both summaries when both exist.
+  const pa = patched ? analyzeFindings(patched) : undefined;
+  const ba = baseline ? analyzeFindings(baseline) : undefined;
+  const primaryAnalysis = pa ?? (ba as NonNullable<typeof ba>);
   const ids = [input.baselineRunId ? `baseline run ${input.baselineRunId}` : '', input.patchedRunId ? `patched run ${input.patchedRunId}` : ''].filter(Boolean).join(', ');
   const starts = [patched?.startedAt, baseline?.startedAt].filter((x): x is string => !!x).sort();
   const ends = [patched?.finishedAt, baseline?.finishedAt].filter((x): x is string => !!x).sort();
@@ -131,11 +136,13 @@ export function runnerResultToSummary(input: { patched?: RunnerResult; baseline?
     ...(starts[0] ? { startedAt: starts[0] } : {}),
     ...(ends.length ? { finishedAt: ends[ends.length - 1] } : {}),
     checks,
+    tools: primary.checks.filter((c) => c.version && c.version !== 'n/a' && c.version !== 'unknown').map((c) => ({ name: c.tool, version: c.version })),
     verified: verdict.verified,
     unverifiedReasons: verdict.unverifiedReasons,
     patchApplied: primary.patchApplied,
     buildOk: primary.buildOk,
     tests: { ...primary.tests },
-    ...(primary.php ? { php: { ...primary.php } } : {})
+    ...(primary.php ? { php: { ...primary.php } } : {}),
+    measured: { basis: patched ? 'patched' : 'baseline', analysis: primaryAnalysis, ...(ba ? { baseline: summarizeMeasured(ba) } : {}), ...(pa ? { patched: summarizeMeasured(pa) } : {}) }
   };
 }

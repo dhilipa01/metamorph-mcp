@@ -159,3 +159,11 @@ and `node-orders` (`npm ci` passed, `npm audit` failed with 9 advisories).
 
 Not exercised by a real run: phpunit (no project with a config), eslint, tsc, `npm test`, the semgrep offline fallback path
 in a truly offline container, and the arm64 build.
+
+## Finding identity fields and local test mode
+
+Findings may also carry (all optional, older results stay valid): `aliases` (CVE, GHSA, PKSA ids), `package`, `installedVersion`, `fixedVersion`, `affectedVersions`, `owasp` (Top 10 2021 ids listed by the tool itself, e.g. Semgrep tags) and `cvss` (SARIF `security-severity` for trivy, npm audit's score). Trivy values come from the "Package / Installed Version / Fixed Version" lines of its SARIF message; composer audit values from `packageName`, `affectedVersions`, `cve`, `advisoryId` and `sources[].remoteId`. `src/modules/scanners/` normalises and deduplicates them.
+
+`LOCAL_REPO_DIR` (test only, never set by the workflow): an absolute directory, for example a bind mount, copied instead of cloning from GitHub, so a run can use `docker run --network none`. `REPO_URL` must still be given; it only names the result. Example used to prove the Semgrep offline fallback:
+`docker run --rm --network none -e REPO_URL=https://github.com/local/offline-demo -e LOCAL_REPO_DIR=/src -e CHECKS=semgrep,gitleaks -v <dir>:/src:ro -v <out>:/out metamorph-runner`
+With no network, `--config auto` fails, the runner falls back to `runner/rules/metamorph-basic.yml` and the semgrep summary reads "offline fallback rules (auto unavailable)". It took about 108 s here, because the registry attempt has to time out first.

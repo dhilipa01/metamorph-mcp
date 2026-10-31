@@ -481,6 +481,25 @@ function Verify({ vm }: { vm: VerifyVM }) {
           <RunLine label="Patched (after)" r={vm.patched} />
         </dl>
       </section>
+      {vm.measured && (
+        <section className="card" aria-labelledby="sd-measured">
+          <h2 id="sd-measured">Measured score (runner tools)</h2>
+          <dl className="facts">
+            <div className="fact">
+              <dt>Baseline (before)</dt>
+              <dd>{vm.measured.baseline} · {vm.measured.baselineFindings} distinct findings</dd>
+            </div>
+            <div className="fact">
+              <dt>Patched (after)</dt>
+              <dd>{vm.measured.patched} · {vm.measured.patchedFindings} distinct findings</dd>
+            </div>
+          </dl>
+          <p className="meta" style={{ marginTop: 8 }}>
+            {vm.measured.note ?? 'The measured score covers only what the runner tools reported; it is not the static assessment score.'}
+            {!vm.verified && ' A measured score does not mean the patch is verified.'}
+          </p>
+        </section>
+      )}
       {vm.checks.length > 0 && (
         <section aria-labelledby="sd-checks">
           <h2 id="sd-checks">Checks ({vm.checkCount})</h2>

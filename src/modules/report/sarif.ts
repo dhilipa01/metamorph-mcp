@@ -154,6 +154,20 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
     });
   }
 
+  // WS8: deduplicated findings of the runner tools, as additional results of the same run. properties.sources lists every tool that
+  // reported the finding; ruleIds start with "runner-" so they never collide with the static assessment's ids.
+  for (const f of d.measured?.findings ?? []) {
+    if (ruleIndex.has(f.id)) continue;
+    ruleIndex.set(f.id, rules.length);
+    rules.push({
+      id: f.id,
+      shortDescription: { text: f.title || f.id },
+      help: { text: f.recommendation || 'See the finding message.' },
+      defaultConfiguration: { level: LEVEL[f.severity] },
+      properties: { tags: tagsOf(f), 'security-severity': f.cvss ? f.cvss.value.toFixed(1) : DEFAULT_SECURITY_SEVERITY[f.severity] }
+    });
+  }
+
   const results = d.findings.map((f) => {
     const loc = resolveLocation(f, d);
     return {
@@ -180,6 +194,37 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
     };
   });
 
+  const measuredResults = (d.measured?.findings ?? []).map((f) => {
+    const loc = resolveLocation(f, d);
+    return {
+      ruleId: f.id,
+      ruleIndex: ruleIndex.get(f.id) ?? 0,
+      level: LEVEL[f.severity],
+      message: { text: `${f.title}${f.evidence ? ` (${f.evidence})` : ''}. ${f.recommendation} Reported by: ${f.sources.join(', ')}.${loc.note ? ` (Location: ${loc.note}.)` : ''}`.trim() },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: loc.path, uriBaseId: 'SRCROOT' },
+            ...(loc.line !== undefined ? { region: { startLine: loc.line } } : {})
+          }
+        }
+      ],
+      properties: {
+        locationKind: loc.kind,
+        severity: f.severity,
+        category: f.category,
+        origin: d.measured?.origin,
+        sources: f.sources,
+        ...(f.aliases.length ? { aliases: f.aliases } : {}),
+        ...(f.package ? { package: f.package } : {}),
+        ...(f.severityNote ? { severityNote: f.severityNote } : {}),
+        ...(f.cvss ? { cvss: f.cvss.value, 'cvss-origin': f.cvss.origin } : {}),
+        ...(f.epss ? { epss: f.epss.value, 'epss-origin': f.epss.origin } : {}),
+        ...(f.kev ? { kev: true } : {})
+      }
+    };
+  });
+
   return {
     $schema: SARIF_SCHEMA,
     version: '2.1.0',
@@ -190,7 +235,7 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
         ...(d.meta.commitSha
           ? { versionControlProvenance: [{ repositoryUri: d.meta.repoUrl, revisionId: d.meta.commitSha, ...(d.meta.subfolder ? { mappedTo: { uriBaseId: 'SRCROOT', uri: d.meta.subfolder } } : {}) }] }
           : {}),
-        results
+        results: [...results, ...measuredResults]
       }
     ]
   };

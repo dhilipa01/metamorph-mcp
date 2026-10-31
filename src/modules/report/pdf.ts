@@ -6,7 +6,7 @@
 // creation date so identical input gives identical bytes.
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import type { Origin, ReportData, ReportFinding } from './report-data.js';
+import type { Origin, ReportData, ReportFinding, ReportMeasuredFinding } from './report-data.js';
 import { NOT_RECORDED, cleanText } from './report-data.js';
 import { TagNode, TagTree, installPdfTagging } from './pdf-tags.js';
 
@@ -213,7 +213,10 @@ export interface Caps {
   appendixRows: number;
   dependencyRows: number;
   patchFileRows: number;
+  measuredTop?: number; // runner findings shown in the body (default MEASURED_TOP); the rest go to Appendix E
 }
+
+export const MEASURED_TOP = 15;
 
 export const DEFAULT_CAPS: Caps = { topN: TOP_FINDINGS, appendixRows: 300, dependencyRows: 250, patchFileRows: 40 };
 
@@ -475,6 +478,25 @@ function verificationSection(d: ReportData): Node[] {
   out.push(h2('Result'));
   out.push(table({ widths: [130, '*'], header: ['Item', 'Value'], rows }));
   if (v.scoreBefore && v.scoreAfter) out.push(para(`Score before: ${label(v.scoreBefore)}. Score after: ${label(v.scoreAfter)}. Both measured by the runner.`));
+  const mm = d.measured;
+  if (mm?.baseline && mm.patched) {
+    out.push(h2('Measured score before and after (runner tools)'));
+    const tools = [...new Set([...mm.baseline.perTool, ...mm.patched.perTool].map((t) => t.tool))].sort();
+    const n = (r: typeof mm.baseline, tool: string): number => r.perTool.find((t) => t.tool === tool)?.reported ?? 0;
+    out.push(
+      table({
+        widths: [150, 90, 90, '*'],
+        header: ['Item', 'Baseline (before)', 'Patched (after)', 'Origin'],
+        rows: [
+          [td('Measured score'), td(String(mm.baseline.score.value)), td(String(mm.patched.score.value)), td(mm.origin)],
+          [td('Distinct findings'), td(String(mm.baseline.distinct)), td(String(mm.patched.distinct)), td(mm.origin)],
+          ...tools.map((t) => [td(`Findings reported by ${t}`), td(String(n(mm.baseline!, t))), td(String(n(mm.patched!, t))), td(mm.origin)])
+        ]
+      })
+    );
+    out.push(para(`Static assessment score of this report: ${mm.staticScore.value} out of 100. ${mm.note}`));
+    if (!v.verified) out.push(para('A measured score does not mean the patch is verified: the reasons above still apply.'));
+  }
   out.push(h2('Checks'));
   out.push(
     table({
@@ -483,6 +505,87 @@ function verificationSection(d: ReportData): Node[] {
       rows: v.checks.map((c) => [td(c.name), td(c.status, { bold: c.status === 'failed' }), td(c.detail ?? '-'), td(typeof c.durationMs === 'number' ? `${c.durationMs} ms` : '-')])
     })
   );
+  return out;
+}
+
+function measuredRow(f: ReportMeasuredFinding): Node[] {
+  return [
+    td(f.severity, { bold: true }),
+    {
+      stack: [
+        { text: safeText(f.title), style: 'td' },
+        { text: safeText(`Fix: ${f.recommendation}`), style: 'tdMuted' },
+        ...(f.severityNote ? [{ text: safeText(`Severity: ${f.severityNote}`), style: 'tdMuted' }] : [])
+      ]
+    },
+    td(f.sources.join(', ') || '-'),
+    td(f.cwe.join(', ') || '-'),
+    td(f.owasp.join(', ') || '-'),
+    td(f.kev ? 'YES' : '-', f.kev ? { bold: true } : {})
+  ];
+}
+
+// WS8: findings from the runner tools, deduplicated across tools, with their own measured score. Absent when no runner result is attached.
+function measuredSection(d: ReportData, caps: Caps): Node[] {
+  const m = d.measured;
+  if (!m) return [];
+  const out: Node[] = [h1('Findings measured by the runner', true)];
+  const dd = m.dedupe;
+  out.push(
+    para(
+      `Measured score (${m.origin}): ${m.score.value} out of 100 on the ${m.basis} run. Static assessment score of this report: ${m.staticScore.value} out of 100. ${m.note}`,
+      { bold: true }
+    )
+  );
+  out.push(
+    para(
+      `${dd.before} findings were reported by the tools; ${dd.after} are distinct after removing findings several tools reported about the same advisory or code location (${dd.collapsed} merged, none dropped). ${m.notListed > 0 ? `${m.notListed} more findings were counted by the runner but not listed, and are not in this score.` : 'Every finding the runner counted is listed.'}`
+    )
+  );
+  out.push(h2('Findings per tool'));
+  out.push(
+    table({
+      widths: [100, 60, 50, 60, '*'],
+      header: ['Tool', 'Version', 'Status', 'Reported', 'Reported only by this tool'],
+      rows: m.perTool.map((t) => [td(t.tool), td(t.version ?? '-'), td(t.status ?? '-'), td(t.reported), td(t.uniqueOnly)])
+    })
+  );
+  const top = m.findings.slice(0, caps.measuredTop ?? MEASURED_TOP);
+  if (top.length === 0) {
+    out.push(para('No findings were reported by the runner tools.'));
+    return out;
+  }
+  out.push(h2(`Top ${top.length} distinct findings, KEV first, then severity and EPSS`));
+  out.push(
+    table({
+      widths: [44, '*', 76, 44, 44, 34],
+      header: ['Severity', 'Finding and fix', 'Reported by', 'CWE', 'OWASP', 'KEV\nreported'],
+      rows: top.map(measuredRow)
+    })
+  );
+  out.push(note('CWE and OWASP appear only where the tool listed a CWE or OWASP category, or where a listed CWE is in the OWASP Top 10 (2021) table. Nothing is guessed.'));
+  if (m.findings.length > top.length) out.push(note(`${m.findings.length - top.length} more distinct findings are listed in Appendix E.`));
+  return out;
+}
+
+function measuredAppendix(d: ReportData, caps: Caps): Node[] {
+  const m = d.measured;
+  if (!m) return [];
+  const rest = m.findings.slice(caps.measuredTop ?? MEASURED_TOP);
+  const out: Node[] = [h1('Appendix E: runner findings', true)];
+  if (rest.length === 0) {
+    out.push(para('All runner findings are already listed in the body.'));
+    return out;
+  }
+  out.push(
+    table({
+      widths: [44, 120, '*', 90],
+      header: ['Severity', 'Rule id', 'Title', 'Reported by'],
+      rows: rest.slice(0, caps.appendixRows).map((f) => [td(f.severity), td(f.id), td(f.title), td(f.sources.join(', ') || '-')])
+    })
+  );
+  if (rest.length > caps.appendixRows) out.push(note(`${rest.length - caps.appendixRows} further runner findings are omitted to respect the page cap; the SARIF export lists every one.`));
+  if (m.omitted > 0) out.push(note(`${m.omitted} distinct runner findings beyond the ${m.findings.length} kept in the report data are not listed anywhere in this report.`));
   return out;
 }
 
@@ -640,8 +743,10 @@ export function buildDocDefinition(d: ReportData, caps: Caps = DEFAULT_CAPS, max
       ...planSection(d),
       ...patchSection(d, caps),
       ...verificationSection(d),
+      ...measuredSection(d, caps),
       ...dependencySection(d, caps),
-      ...appendix(d, caps)
+      ...appendix(d, caps),
+      ...measuredAppendix(d, caps)
     ]
   };
 }
@@ -664,7 +769,7 @@ export function countPages(buf: Buffer): number {
 }
 
 function shrink(c: Caps): Caps {
-  return { topN: c.topN, appendixRows: Math.floor(c.appendixRows / 2), dependencyRows: Math.floor(c.dependencyRows / 2), patchFileRows: Math.floor(c.patchFileRows / 2) };
+  return { topN: c.topN, ...(c.measuredTop !== undefined ? { measuredTop: c.measuredTop } : {}), appendixRows: Math.floor(c.appendixRows / 2), dependencyRows: Math.floor(c.dependencyRows / 2), patchFileRows: Math.floor(c.patchFileRows / 2) };
 }
 
 // Renders the report. If the layout would run past MAX_PAGES the long tables are halved and it tries again, so the

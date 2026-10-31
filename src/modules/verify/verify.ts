@@ -6,6 +6,7 @@ import type { RunnerSummary } from '../report/report-data.js';
 import { judge, overallStatus, runnerResultToSummary, viewOf, type RunView, type Verdict } from './evaluate.js';
 import { GithubRunner, RunnerError, isFinal, type RunInfo, type RunState } from './github-runner.js';
 import type { RunnerResult } from './result.js';
+import { analyzeFindings, compareMeasured, type MeasuredComparison } from '../scanners/measured.js';
 
 export const DISPATCH_WAIT_MS = 60_000; // fits the ~120 s tool budget after the repository download and assessment
 export const RESUME_WAIT_MS = 90_000;
@@ -17,6 +18,9 @@ export interface VerifyOutput extends Verdict {
   patched: RunView;
   baseline: RunView;
   resume?: { run_id: string; baseline_run_id?: string };
+  // Present only when both runs completed and both results were readable. Shown even when the patched build failed or no tests
+  // ran: `verified` and `unverifiedReasons` above still decide whether the patch counts as verified, never this score.
+  measured?: MeasuredComparison;
   notes: string[];
   hint: string;
 }
@@ -75,6 +79,8 @@ function finish(patched: Tracked | undefined, baseline: Tracked | undefined, bas
   const status = overallStatus([patched?.view, baseline?.view]);
   const ids = { run_id: pv.runId, baseline_run_id: bv.runId };
   const waiting = !isFinal(status);
+  const measured =
+    patched?.result && baseline?.result && patched.view.status === 'completed' && baseline.view.status === 'completed' ? compareMeasured(analyzeFindings(baseline.result), analyzeFindings(patched.result)) : undefined;
   return {
     mode: 'measured',
     status,
@@ -82,6 +88,7 @@ function finish(patched: Tracked | undefined, baseline: Tracked | undefined, bas
     ...(base.stage ? { stage: base.stage } : {}),
     patched: pv,
     baseline: bv,
+    ...(measured ? { measured } : {}),
     ...(pv.runId ? { resume: { run_id: pv.runId, ...(bv.runId ? { baseline_run_id: bv.runId } : {}) } } : {}),
     notes: base.notes,
     hint: waiting
