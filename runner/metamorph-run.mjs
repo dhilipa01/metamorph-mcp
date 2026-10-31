@@ -7,10 +7,11 @@
 //   OUT_FILE (default /out/result.json), WORK_DIR (default /work), CHECK_TIMEOUT_S (default 600),
 //   INSTALL_TIMEOUT_S (default 900), OUTPUT_CAP_BYTES (default 16 MiB), MAX_PATCH_B64_CHARS (default 60000).
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, rmSync, cpSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gunzipSync } from 'node:zlib';
+import { selectPhp, lockIsStub } from './php-select.mjs';
 
 // ---------- config ----------
 const argv = Object.fromEntries(
@@ -34,6 +35,10 @@ const MAX_PATCH_B64_CHARS = Number(cfg('MAX_PATCH_B64_CHARS', '60000'));
 const MAX_FINDINGS = 500;
 const RULES_DIR = cfg('SEMGREP_RULES_DIR', '/opt/metamorph/rules');
 const RECTOR_FALLBACK = cfg('RECTOR_FALLBACK_CONFIG', '/opt/metamorph/rector.php');
+// PHP versions the image carries: PHP_DEFAULT is `php` on PATH, the others live in PHP_ROOT/<ver>/shim/php.
+const PHP_VERSIONS = cfg('PHP_VERSIONS', '7.4,8.1,8.3,8.4').split(',').map((v) => v.trim()).filter(Boolean);
+const PHP_DEFAULT = cfg('PHP_DEFAULT', '8.4');
+const PHP_ROOT = cfg('PHP_ROOT', '/opt/php');
 
 // ---------- redaction (port of src/common/redact.ts; keep the two in sync) ----------
 const PATTERNS = [
@@ -161,10 +166,10 @@ function run(cmd, args, { cwd, timeoutMs = CHECK_TIMEOUT_MS, env = {}, cap = OUT
 }
 
 const versionCache = new Map();
-async function toolVersion(tool, args = ['--version'], cwd) {
-  const key = tool + args.join(' ');
+async function toolVersion(tool, args = ['--version'], cwd, env = {}) {
+  const key = tool + args.join(' ') + (env.PATH ?? '');
   if (versionCache.has(key)) return versionCache.get(key);
-  const r = await run(tool, args, { cwd, timeoutMs: 30000, cap: 64 * 1024 });
+  const r = await run(tool, args, { cwd, env, timeoutMs: 30000, cap: 64 * 1024 });
   const text = (r.out || r.err).split('\n').find((l) => /\d+\.\d+/.test(l)) ?? '';
   const m = text.match(/\d+\.\d+(?:\.\d+)?(?:[-+.\w]*)?/);
   const v = r.spawnError ? 'unavailable' : (m ? m[0] : 'unknown');
@@ -217,7 +222,7 @@ function addFinding(tool, f) {
 
 /** Record a check. `parsed` = {findings?, tests?, counts?, summary?, status?} from a parser. */
 async function record(def, r, parsed, versionArgs) {
-  const version = await toolVersion(def.bin ?? def.tool, versionArgs ?? def.versionArgs ?? ['--version'], def.cwd);
+  const version = await toolVersion(def.bin ?? def.tool, versionArgs ?? def.versionArgs ?? ['--version'], def.cwd, def.env);
   const counts = sevCounts();
   for (const f of parsed?.findings ?? []) counts[addFinding(def.name ?? def.tool, f)]++;
   Object.assign(counts, parsed?.counts ?? {});
@@ -612,22 +617,73 @@ async function main() {
   } else notSelected('hadolint');
 
   // 4. PHP
+  // Pick the PHP version from the project's own constraints; composer and phpunit run on it.
+  let phpEnv = {};
+  let phpRoot = root;
+  let phpSel;
+  if (hasComposer && (on('composer-install') || on('phpunit'))) {
+    const installed = [];
+    for (const label of PHP_VERSIONS) {
+      const bin = label === PHP_DEFAULT ? 'php' : join(PHP_ROOT, label, 'shim', 'php');
+      if (label !== PHP_DEFAULT && !existsSync(bin)) continue;
+      const v = await run(bin, ['-r', 'echo PHP_VERSION;'], { timeoutMs: 30000, cap: 4096 });
+      if (v.code === 0 && /^\d+\.\d+\.\d+/.test(v.out.trim())) installed.push({ label, version: v.out.trim().split(/[^\d.]/)[0], bin });
+    }
+    phpSel = selectPhp({ composerJson: readJson(join(root, 'composer.json')), lock: readJson(join(root, 'composer.lock')), installed, defaultLabel: PHP_DEFAULT });
+    const chosen = installed.find((i) => i.label === phpSel.selected);
+    if (chosen && chosen.label !== PHP_DEFAULT) phpEnv = { PATH: `${dirname(chosen.bin)}:${CHILD_ENV.PATH}` };
+    result.php = {
+      ...(phpSel.selected ? { selected: phpSel.selected, version: chosen?.version ?? phpSel.version } : {}),
+      ...(phpSel.constraint ? { constraint: clip(phpSel.constraint, 200) } : {}),
+      constraintSource: phpSel.constraintSource,
+      reason: clip(phpSel.reason, 400),
+      supported: phpSel.supported
+    };
+    console.error(`[php] ${phpSel.supported ? `selected ${phpSel.selected}` : 'unsupported'}: ${phpSel.reason}`);
+  }
   let composerNoDev = false;
   if (needs('composer-install', hasComposer, 'no composer.json')) {
-    const installArgs = ['install', '--no-scripts', '--no-plugins', '--no-interaction', '--no-progress', '--prefer-dist'];
-    let r = await run('composer', installArgs, { cwd: root, timeoutMs: INSTALL_TIMEOUT_MS, cap: 2 * 1024 * 1024 });
+    const installArgs = ['install', '--no-scripts', '--no-plugins', '--no-interaction', '--no-progress', '--prefer-dist', '--no-security-blocking'];
+    const lockJson = readJson(join(root, 'composer.lock'));
+    let r;
     let note;
-    // Old composer.lock files carry no require-dev information; composer refuses them unless --no-dev is given.
-    if (r.code !== 0 && /doesnotcontainrequire-devinformation/.test((r.err + r.out).replace(/\s+/g, ''))) {
-      const first = r;
-      r = await run('composer', [...installArgs, '--no-dev'], { cwd: root, timeoutMs: INSTALL_TIMEOUT_MS, cap: 2 * 1024 * 1024 });
-      r.durationMs += first.durationMs;
-      composerNoDev = true; // audit must skip dev too, install success or not
-      note = 'lock file has no require-dev information (old composer.lock format) (retried with --no-dev)';
+    let forced; // status override
+    if (!phpSel.supported) {
+      const msg = phpSel.reason.startsWith('no supported PHP version') ? phpSel.reason : `no supported PHP version for constraint ${phpSel.constraint ?? '(unknown)'}`;
+      result.checks.push({ tool: 'composer-install', version: 'n/a', status: 'error', durationMs: 0, summary: clip(msg, 500), counts: {} });
+      console.error(`[check] composer-install error ${msg}`);
+      composerInstallOk = false;
+    } else {
+      if (lockIsStub(lockJson)) {
+        // The committed composer.lock lists packages without dist/source, so `composer install` cannot use it. Resolve
+        // fresh in a scratch copy and say so; the original lock is never reported as having built.
+        const scratch = join(mkdtempSync(join(tmpdir(), 'mm-scratch-')), 'project');
+        cpSync(root, scratch, { recursive: true, filter: (p) => !/(^|\/)(vendor|node_modules|\.git)$/.test(p) });
+        rmSync(join(scratch, 'composer.lock'), { force: true });
+        const upd = await run('composer', ['update', '--no-scripts', '--no-plugins', '--no-interaction', '--no-progress', '--ignore-platform-reqs', '--no-security-blocking'], { cwd: scratch, env: phpEnv, timeoutMs: INSTALL_TIMEOUT_MS, cap: 2 * 1024 * 1024 });
+        const pkgs = [...(lockJson.packages ?? []), ...(lockJson['packages-dev'] ?? [])];
+        const bare = pkgs.filter((p) => !p || (!p.dist && !p.source)).length;
+        result.php.lockRegenerated = true;
+        r = upd;
+        composerNoDev = true; // a stub lock has no require-dev information; audit --locked needs --no-dev
+        forced = 'fail'; // the original lock did not build, whatever the fresh resolution did
+        note = `original composer.lock is a stub (${bare} of ${pkgs.length} locked packages have no dist/source) and cannot be installed; lock regenerated with composer update --ignore-platform-reqs in a scratch copy on PHP ${result.php.selected}: ${upd.code === 0 ? 'fresh install ok' : `fresh install failed: ${errText(upd.err || upd.out, 160)}`}. The original lock did not build`;
+        if (upd.code === 0) phpRoot = scratch;
+      } else {
+        r = await run('composer', installArgs, { cwd: root, env: phpEnv, timeoutMs: INSTALL_TIMEOUT_MS, cap: 2 * 1024 * 1024 });
+        // Old composer.lock files carry no require-dev information; composer refuses them unless --no-dev is given.
+        if (r.code !== 0 && /doesnotcontainrequire-devinformation/.test((r.err + r.out).replace(/\s+/g, ''))) {
+          const first = r;
+          r = await run('composer', [...installArgs, '--no-dev'], { cwd: root, env: phpEnv, timeoutMs: INSTALL_TIMEOUT_MS, cap: 2 * 1024 * 1024 });
+          r.durationMs += first.durationMs;
+          composerNoDev = true; // audit must skip dev too, install success or not
+          note = 'lock file has no require-dev information (old composer.lock format) (retried with --no-dev)';
+        }
+      }
+      const c = await record({ name: 'composer-install', tool: 'composer', bin: 'composer', env: phpEnv, failCodes: [1, 2] }, r, forced ? { status: forced, summary: note } : { summary: r.code === 0 ? note : undefined });
+      c.tool = 'composer-install';
+      composerInstallOk = c.status === 'pass';
     }
-    const c = await record({ name: 'composer-install', tool: 'composer', bin: 'composer', failCodes: [1, 2] }, r, { summary: r.code === 0 ? note : undefined });
-    c.tool = 'composer-install';
-    composerInstallOk = c.status === 'pass';
   }
   if (needs('composer-audit', hasComposer, 'no composer.json')) {
     const auditArgs = ['audit', '--locked', '--format=json', '--no-interaction'];
@@ -638,15 +694,15 @@ async function main() {
     c.tool = 'composer-audit';
   }
   if (on('phpunit')) {
-    const hasPhpunit = existsSync(join(root, 'vendor/bin/phpunit')) && (has('phpunit.xml') || has('phpunit.xml.dist') || has('phpunit.dist.xml'));
-    if (!hasPhpunit) skip('phpunit', composerInstallOk === false ? 'composer install did not succeed' : 'no phpunit config or vendor/bin/phpunit');
+    const hasPhpunit = existsSync(join(phpRoot, 'vendor/bin/phpunit')) && (has('phpunit.xml') || has('phpunit.xml.dist') || has('phpunit.dist.xml'));
+    if (!hasPhpunit) skip('phpunit', !(has('phpunit.xml') || has('phpunit.xml.dist') || has('phpunit.dist.xml')) ? 'no phpunit config' : composerInstallOk === false ? 'composer install did not succeed' : 'no vendor/bin/phpunit');
     else {
       const junit = join(tmp, 'phpunit.xml');
-      const r = await run('php', ['vendor/bin/phpunit', '--log-junit', junit, '--no-interaction'], { cwd: root });
+      const r = await run('php', ['vendor/bin/phpunit', '--log-junit', junit, '--no-interaction'], { cwd: phpRoot, env: phpEnv });
       const tests = parseJunit(junit);
       const parsed = { tests, findings: [], summary: tests ? `${tests.passed}/${tests.ran} passed` : `no junit output (exit ${r.code}): ${tail(r.err || r.out)}` };
       if (!tests && r.code !== 0) parsed.status = 'error';
-      const c = await record({ tool: 'phpunit', bin: 'php', versionArgs: ['vendor/bin/phpunit', '--version'], cwd: root, failCodes: [1, 2] }, r, parsed);
+      const c = await record({ tool: 'phpunit', bin: 'php', versionArgs: ['vendor/bin/phpunit', '--version'], cwd: phpRoot, env: phpEnv, failCodes: [1, 2] }, r, parsed);
       void c;
     }
   } else notSelected('phpunit');

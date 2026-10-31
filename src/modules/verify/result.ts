@@ -30,6 +30,18 @@ export const ResultFindingSchema = z.object({
   cwe: z.array(short(32)).max(RESULT_LIMITS.cwe).optional()
 });
 
+// PHP version the runner chose for composer and phpunit, and why. Optional: older results do not carry it.
+export const PhpSelectionSchema = z.object({
+  selected: short(16).optional(),
+  version: short(32).optional(),
+  constraint: short(200).optional(),
+  constraintSource: short(40),
+  reason: short(400),
+  supported: z.boolean(),
+  // true when composer.lock was unusable and dependencies were resolved afresh in a scratch copy
+  lockRegenerated: z.boolean().optional()
+});
+
 export const RunnerResultSchema = z.object({
   schema: z.literal(1),
   repo: short(200),
@@ -47,7 +59,8 @@ export const RunnerResultSchema = z.object({
     passed: z.number().int().min(0).max(10_000_000),
     failed: z.number().int().min(0).max(10_000_000)
   }),
-  buildOk: z.boolean()
+  buildOk: z.boolean(),
+  php: PhpSelectionSchema.optional()
 });
 
 export type RunnerResult = z.infer<typeof RunnerResultSchema>;

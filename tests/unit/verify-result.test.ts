@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { judge } from '../../src/modules/verify/evaluate.js';
 import { RunnerResultSchema, parseRunnerResult, summarizeResult, RESULT_LIMITS } from '../../src/modules/verify/result.js';
 
 const base = () => ({
@@ -110,5 +111,27 @@ describe('runner result schema', () => {
     expect(after.result.patchApplied).toBe(true);
     expect(summarizeResult(after.result).findingsTotal).toBeLessThan(summarizeResult(before.result).findingsTotal);
     expect(JSON.stringify(before.result)).not.toMatch(/\/work\/repo-/); // absolute runner paths are stripped
+  });
+
+  it('accepts the optional php block, still accepts results without it, and caps its strings', () => {
+    const php = { selected: '7.4', version: '7.4.33', constraint: '>=7.2', constraintSource: 'require.php', reason: 'lowest installed version', supported: true, lockRegenerated: true };
+    expect(RunnerResultSchema.safeParse({ ...base(), php }).success).toBe(true);
+    expect(RunnerResultSchema.safeParse(base()).success).toBe(true);
+    expect(RunnerResultSchema.safeParse({ ...base(), php: { ...php, reason: 'x'.repeat(401) } }).success).toBe(false);
+    expect(RunnerResultSchema.safeParse({ ...base(), php: { ...php, supported: 'yes' } }).success).toBe(false);
+  });
+
+  it('validates the real PHP runs: stub lock regenerated, build still not ok, never verified', () => {
+    const load = (n: string) => parseRunnerResult(readFileSync(new URL(`../fixtures/runner/${n}`, import.meta.url), 'utf8'));
+    for (const name of ['php-shop-after-php74.json', 'php-shop-modernized-php84.json']) {
+      const r = load(name);
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      expect(r.result.php?.lockRegenerated).toBe(true);
+      expect(r.result.buildOk).toBe(false);
+      expect(judge({ status: 'completed' } as never, r.result).verified).toBe(false);
+    }
+    const legacy = load('php-shop-after-php74.json');
+    if (legacy.ok) expect(legacy.result.php).toMatchObject({ selected: '7.4', constraint: '>=7.2', constraintSource: 'require.php' });
   });
 });

@@ -2,6 +2,32 @@
 # scripts, project tests, scanners). Run it only in a container or a GitHub Actions ephemeral VM, never in the MCP server.
 # Build:  docker build -t metamorph-runner -f runner/Dockerfile runner
 # Every download is pinned to a version and verified against a published or recorded sha256.
+#
+# PHP: the image runs php 8.4 as `php`, and also carries php 7.4, 8.1 and 8.3 CLI under /opt/php/<ver>/bin/php so the
+# runner can use the PHP version a project asks for. Each extra version is taken from the official php:<ver>-cli image
+# (same extension set), packed with its shared libraries by bundle-php.sh and copied into the final image.
+
+# php 7.4 only exists for Debian 11 (bullseye). Bullseye has reached end of life, so apt must read the Debian archive.
+FROM php:7.4-cli-bullseye AS php74
+RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g' /etc/apt/sources.list 2>/dev/null || true
+RUN apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get -o Acquire::Check-Valid-Until=false install -y --no-install-recommends libzip-dev libicu-dev patchelf binutils \
+ && docker-php-ext-install -j"$(nproc)" zip intl bcmath pdo_mysql pcntl exif
+COPY bundle-php.sh /usr/local/bin/bundle-php.sh
+RUN sh /usr/local/bin/bundle-php.sh 7.4
+
+FROM php:8.1-cli-bookworm AS php81
+RUN apt-get update && apt-get install -y --no-install-recommends libzip-dev libicu-dev patchelf binutils \
+ && docker-php-ext-install -j"$(nproc)" zip intl bcmath pdo_mysql pcntl exif
+COPY bundle-php.sh /usr/local/bin/bundle-php.sh
+RUN sh /usr/local/bin/bundle-php.sh 8.1
+
+FROM php:8.3-cli-bookworm AS php83
+RUN apt-get update && apt-get install -y --no-install-recommends libzip-dev libicu-dev patchelf binutils \
+ && docker-php-ext-install -j"$(nproc)" zip intl bcmath pdo_mysql pcntl exif
+COPY bundle-php.sh /usr/local/bin/bundle-php.sh
+RUN sh /usr/local/bin/bundle-php.sh 8.3
+
 FROM php:8.4-cli-bookworm
 
 ARG TARGETARCH
@@ -79,8 +105,28 @@ RUN mkdir -p /opt/phpstan /opt/rector \
  && ln -s /opt/rector/vendor/bin/rector /usr/local/bin/rector \
  && rm -rf /opt/composer-home
 
+# Extra PHP versions. Libraries that the base image already ships under the same name are dropped from the bundles
+# (same soname, backward compatible); the last loop fails the build if any bundled binary has an unresolved library.
+RUN --mount=type=bind,from=php74,source=/bundle/7.4,target=/mnt/php-7.4 \
+    --mount=type=bind,from=php81,source=/bundle/8.1,target=/mnt/php-8.1 \
+    --mount=type=bind,from=php83,source=/bundle/8.3,target=/mnt/php-8.3 \
+    set -eu; \
+    mkdir -p /opt/php; \
+    for v in 7.4 8.1 8.3; do \
+      cp -a "/mnt/php-$v" "/opt/php/$v"; \
+      for f in "/opt/php/$v"/lib/*; do \
+        n="$(basename "$f")"; \
+        for d in /usr/lib/*-linux-gnu /lib/*-linux-gnu; do [ -e "$d/$n" ] && { rm -f "$f"; break; }; done; \
+      done; \
+      for f in "/opt/php/$v/bin/php" "/opt/php/$v"/ext/*.so; do \
+        if ldd "$f" | grep -q 'not found'; then echo "unresolved library for $f" >&2; ldd "$f" >&2; exit 1; fi; \
+      done; \
+      "/opt/php/$v/shim/php" -v | head -1; \
+    done
+
 COPY rules /opt/metamorph/rules
 COPY rector.php /opt/metamorph/rector.php
+COPY php-select.mjs /opt/metamorph/php-select.mjs
 COPY metamorph-run.mjs /opt/metamorph/metamorph-run.mjs
 
 # Non-root user. /work holds the clone, /out receives result.json.
