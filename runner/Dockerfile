@@ -121,11 +121,12 @@ RUN --mount=type=bind,from=php74,source=/bundle/7.4,target=/mnt/php-7.4 \
       for f in "/opt/php/$v/bin/php" "/opt/php/$v"/ext/*.so; do \
         if ldd "$f" | grep -q 'not found'; then echo "unresolved library for $f" >&2; ldd "$f" >&2; exit 1; fi; \
       done; \
-      "/opt/php/$v/bin/php" -v | head -1; \
+      "/opt/php/$v/shim/php" -v | head -1; \
     done
 
 COPY rules /opt/metamorph/rules
 COPY rector.php /opt/metamorph/rector.php
+COPY php-select.mjs /opt/metamorph/php-select.mjs
 COPY metamorph-run.mjs /opt/metamorph/metamorph-run.mjs
 
 # Non-root user. /work holds the clone, /out receives result.json.

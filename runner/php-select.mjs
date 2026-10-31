@@ -39,7 +39,7 @@ function tokenBounds(token) {
     if (v.wildcard || v.parts.length < 3) return [['>=', lo], ['<', nextPrefix(v.parts)]];
     return [['==', lo]];
   }
-  if (op === '!=' || op === '<>') return v.wildcard ? [['<', lo], ['>=', nextPrefix(v.parts)]].length ? [['!range', lo, nextPrefix(v.parts)]] : [] : [['!=', lo]];
+  if (op === '!=' || op === '<>') return v.wildcard ? [['!range', lo, nextPrefix(v.parts)]] : [['!=', lo]];
   if (op === '>=') return [['>=', lo]];
   if (op === '>') return [v.wildcard || v.parts.length < 3 ? ['>=', nextPrefix(v.parts)] : ['>', lo]];
   if (op === '<') return [['<', lo]];
