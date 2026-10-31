@@ -298,6 +298,38 @@ function stripPath(raw: string, limits: Limits): string[] {
   return stripped;
 }
 
+// Directories are verified once. `verified` holds relative paths (under the real destination root) of directories that this
+// extraction created or lstat-confirmed as real directories (not links). A child of a verified directory that is itself a real
+// directory is inside the root by induction, so no realpath is needed per file. Nothing but this extraction writes into the
+// private workdir, and links are never created, so a cached directory cannot turn into a link while we run.
+async function ensureDir(realRoot: string, rel: string, verified: Set<string>): Promise<void> {
+  if (rel === '' || verified.has(rel)) return;
+  const segs = rel.split('/');
+  let cur = '';
+  for (const seg of segs) {
+    cur = cur === '' ? seg : `${cur}/${seg}`;
+    if (verified.has(cur)) continue;
+    const abs = path.join(realRoot, cur);
+    let st = await fs.lstat(abs).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return undefined;
+      throw e;
+    });
+    if (!st) {
+      try {
+        await fs.mkdir(abs, { mode: 0o755 });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
+      st = await fs.lstat(abs);
+    }
+    if (st.isSymbolicLink()) throw new Error('path escapes the allowed directory');
+    if (!st.isDirectory()) throw new Error('archive entry conflicts with an existing file');
+    verified.add(cur);
+  }
+}
+
+const WRITE_CONCURRENCY = 16;
+
 export async function extractTarGz(
   data: Buffer,
   destDir: string,
@@ -313,87 +345,117 @@ export async function extractTarGz(
     throw new Error('archive is not valid gzip');
   }
 
+  const realRoot = await fs.realpath(destDir);
+  const verified = new Set<string>();
+  const inflight = new Set<Promise<void>>();
+  let writeError: unknown;
+  let failed = false;
+
   let files = 0;
   let dirs = 0;
   let bytes = 0;
   let pendingName: string | undefined;
   let commit: string | undefined;
-  const skippedLinks: string[] = []; // stripped paths of skipped links; nothing may be written beneath them
+  const skippedLinks = new Set<string>(); // stripped paths of skipped links; nothing may be written beneath them
   let off = 0;
 
-  while (off + BLOCK <= tar.length) {
-    const h = tar.subarray(off, off + BLOCK);
-    if (h.every((b) => b === 0)) break;
-    if (!checksumOk(h)) throw new Error('corrupt tar header');
-    const size = octal(h, 124, 12);
-    const type = String.fromCharCode(h[156]);
-    const bodyStart = off + BLOCK;
-    if (bodyStart + size > tar.length) throw new Error('truncated tar archive');
-    const body = tar.subarray(bodyStart, bodyStart + size);
-    off = bodyStart + Math.ceil(size / BLOCK) * BLOCK;
+  try {
+    while (off + BLOCK <= tar.length) {
+      if (failed) break;
+      const h = tar.subarray(off, off + BLOCK);
+      if (h.every((b) => b === 0)) break;
+      if (!checksumOk(h)) throw new Error('corrupt tar header');
+      const size = octal(h, 124, 12);
+      const type = String.fromCharCode(h[156]);
+      const bodyStart = off + BLOCK;
+      if (bodyStart + size > tar.length) throw new Error('truncated tar archive');
+      const body = tar.subarray(bodyStart, bodyStart + size);
+      off = bodyStart + Math.ceil(size / BLOCK) * BLOCK;
 
-    if (type === 'g') {
-      // pax_global_header: only the first one counts, and only if it comes before any file entry
-      if (commit === undefined && files === 0 && dirs === 0 && size <= MAX_META) commit = commitFromGlobalHeader(body);
-      continue;
-    }
-    if (type === 'x' || type === 'L') {
-      if (size > MAX_META) throw new Error('archive metadata record too large');
-      if (type === 'x') {
-        const p = parsePaxPath(body);
-        if (p !== undefined) pendingName = p;
-      } else {
-        const end = body.indexOf(0);
-        if (end !== -1 && body.subarray(end).some((b) => b !== 0)) throw new Error('NUL byte in archive entry name');
-        pendingName = body.subarray(0, end === -1 ? body.length : end).toString('utf8');
+      if (type === 'g') {
+        // pax_global_header: only the first one counts, and only if it comes before any file entry
+        if (commit === undefined && files === 0 && dirs === 0 && size <= MAX_META) commit = commitFromGlobalHeader(body);
+        continue;
       }
-      continue;
-    }
-    if (type === 'K') continue; // GNU long link name: links are skipped anyway
+      if (type === 'x' || type === 'L') {
+        if (size > MAX_META) throw new Error('archive metadata record too large');
+        if (type === 'x') {
+          const p = parsePaxPath(body);
+          if (p !== undefined) pendingName = p;
+        } else {
+          const end = body.indexOf(0);
+          if (end !== -1 && body.subarray(end).some((b) => b !== 0)) throw new Error('NUL byte in archive entry name');
+          pendingName = body.subarray(0, end === -1 ? body.length : end).toString('utf8');
+        }
+        continue;
+      }
+      if (type === 'K') continue; // GNU long link name: links are skipped anyway
 
-    let name = cstring(h, 0, 100);
-    if (h.subarray(257, 263).toString('latin1') === 'ustar\0') {
-      const prefix = cstring(h, 345, 155);
-      if (prefix) name = `${prefix}/${name}`;
-    }
-    if (pendingName !== undefined) {
-      name = pendingName;
-      pendingName = undefined;
-    }
+      let name = cstring(h, 0, 100);
+      if (h.subarray(257, 263).toString('latin1') === 'ustar\0') {
+        const prefix = cstring(h, 345, 155);
+        if (prefix) name = `${prefix}/${name}`;
+      }
+      if (pendingName !== undefined) {
+        name = pendingName;
+        pendingName = undefined;
+      }
 
-    const segs = stripPath(name, limits); // every entry is validated, even ones we skip
+      const segs = stripPath(name, limits); // every entry is validated, even ones we skip
 
-    const isFile = type === '0' || type === '\0';
-    const isDir = type === '5';
-    if (!isFile && !isDir) {
-      // symlink, hard link, device, FIFO, anything else: skipped, never created
-      if (segs.length > 0) skippedLinks.push(segs.join('/'));
-      continue;
-    }
-    if (segs.length === 0) {
-      if (isFile) throw new Error('unexpected file at archive top level');
-      continue; // the stripped top-level folder itself
-    }
-    const rel = segs.join('/');
-    if (skippedLinks.some((l) => rel === l || rel.startsWith(l + '/'))) {
-      throw new Error('archive entry written through a skipped link');
-    }
+      const isFile = type === '0' || type === '\0';
+      const isDir = type === '5';
+      if (!isFile && !isDir) {
+        // symlink, hard link, device, FIFO, anything else: skipped, never created
+        if (segs.length > 0) skippedLinks.add(segs.join('/'));
+        continue;
+      }
+      if (segs.length === 0) {
+        if (isFile) throw new Error('unexpected file at archive top level');
+        continue; // the stripped top-level folder itself
+      }
+      const rel = segs.join('/');
+      if (skippedLinks.size > 0) {
+        let prefix = '';
+        for (const s of segs) {
+          prefix = prefix === '' ? s : `${prefix}/${s}`;
+          if (skippedLinks.has(prefix)) throw new Error('archive entry written through a skipped link');
+        }
+      }
 
-    if (isDir) {
-      if (++dirs > limits.maxFiles) throw new Error('archive has too many entries');
-      const target = await resolveInside(destDir, rel);
-      await fs.mkdir(target, { recursive: true, mode: 0o755 });
-      await resolveInside(destDir, rel);
-      continue;
-    }
+      if (isDir) {
+        if (++dirs > limits.maxFiles) throw new Error('archive has too many entries');
+        await ensureDir(realRoot, rel, verified);
+        continue;
+      }
 
-    if (++files > limits.maxFiles) throw new Error('archive has too many files');
-    bytes += size;
-    if (bytes > limits.maxExtractedBytes) throw new Error('archive expands beyond the extraction limit');
-    const parent = await resolveInside(destDir, segs.slice(0, -1).join('/'));
-    await fs.mkdir(parent, { recursive: true, mode: 0o755 });
-    const target = await resolveInside(destDir, rel); // re-check after directories exist
-    await fs.writeFile(target, body, { flag: 'wx', mode: 0o644 });
+      if (++files > limits.maxFiles) throw new Error('archive has too many files');
+      bytes += size;
+      if (bytes > limits.maxExtractedBytes) throw new Error('archive expands beyond the extraction limit');
+      await ensureDir(realRoot, segs.slice(0, -1).join('/'), verified);
+      // The parent is a verified real directory and every segment is free of '..', NUL and separators, so the final containment
+      // check is plain path arithmetic; 'wx' (O_EXCL) refuses an existing file or link at the final component.
+      const target = path.join(realRoot, rel);
+      if (!isInside(realRoot, target) || target === realRoot) throw new Error('path escapes the allowed directory');
+      if (inflight.size >= WRITE_CONCURRENCY) await Promise.race(inflight);
+      if (failed) break;
+      const w: Promise<void> = fs.writeFile(target, body, { flag: 'wx', mode: 0o644 }).then(
+        () => {
+          inflight.delete(w);
+        },
+        (e) => {
+          inflight.delete(w);
+          if (!failed) {
+            failed = true;
+            writeError = e;
+          }
+        }
+      );
+      inflight.add(w);
+    }
+  } finally {
+    await Promise.all(inflight); // never leave writes running after returning or throwing
   }
+  if (failed) throw writeError;
   return { files, bytes, ...(commit ? { commit } : {}) };
 }
