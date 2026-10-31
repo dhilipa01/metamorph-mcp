@@ -3,8 +3,9 @@
 `cloud_inventory` reads Lambda, RDS, EKS and EC2 metadata in ONE AWS account and reports what is end-of-life or soon to be.
 It changes nothing.
 
-**Status: fixture-tested only.** No real AWS account was used to build or test this. The tests run the real AWS SDK client
-objects against stubbed responses. See "Acceptance check" for what to run once an account exists.
+**Status: not verified against a real AWS account.** The unit tests run the real AWS SDK client objects against stubbed
+responses, and an optional test replays the same calls against the moto emulator (see "Evidence"). See "Acceptance check" for what
+to run once an account exists.
 
 ## What the role can and cannot do
 
@@ -92,8 +93,30 @@ Real responses observed on 2026-10-31: `aws-lambda` (52 runtime ids such as `nod
 5. Change `ExternalId` in the stack to a wrong value; confirm the error is a short message with the code `AccessDenied` and no secrets.
 6. Check the server logs contain no key ids, secrets or tokens.
 
-## Emulator check: not available
+## Evidence
 
-A wire-level check against LocalStack was tried on 2026-10-31. The pinned image `localstack/localstack:2026.10.4` exits at start
-with code 55 ("License activation failed ... set the LOCALSTACK_AUTH_TOKEN"): the current community image needs an account auth
-token. No workaround was attempted and no emulator test exists. Everything is verified by fixtures only.
+Date of the run: 2026-10-31. Nothing here was checked against a real AWS account.
+
+- Fixture-tested: all logic, via stubbed SDK responses (`tests/unit/cloud-aws.test.ts`, `tests/unit/cloud-iam-actions.test.ts`).
+- Wire-level check against an emulator (moto 5.2.5), not a real AWS account: STS AssumeRole, Lambda ListFunctions, RDS
+  DescribeDBInstances, EKS ListClusters and DescribeCluster, EC2 DescribeInstances and DescribeImages. The real AWS SDK v3 clients
+  (pinned) sent real HTTP requests to the emulator and our inventory code turned the answers into findings (Lambda on a deprecated
+  runtime found, RDS and EKS versions mapped to end-of-life cycles, a failing service or region isolated). Test:
+  `tests/integration/aws-moto.test.ts`, 7 tests passed.
+- What this does NOT show: that real AWS returns identical shapes, that the IAM role grants enough, that the ExternalId condition
+  is enforced (moto does not enforce IAM policies or ExternalId), throttling, or pagination limits. Those stay unverified until the
+  Acceptance check below is run in a real account.
+- Earlier attempt: `localstack/localstack:2026.10.4` exits at start with code 55 (licence activation, needs an auth token), so it
+  was not used.
+
+Reproduce (needs Docker; no account or token; use a fresh container per run because the test creates fixed-name resources):
+
+```
+docker run -d --rm --name metamorph-moto -p 127.0.0.1:5057:5000 motoserver/moto:5.2.5
+METAMORPH_MOTO=1 METAMORPH_MOTO_ENDPOINT=http://127.0.0.1:5057 npx vitest run tests/integration/aws-moto.test.ts
+docker rm -f metamorph-moto
+```
+
+The emulator endpoint is injected by the test through the client factory and STS client passed to `runAwsInventory`; the server
+reads no endpoint setting, so a deployed server cannot be pointed at another endpoint. Without `METAMORPH_MOTO=1` (and always in CI)
+the test is skipped with a logged reason, so `npm test` stays offline.
