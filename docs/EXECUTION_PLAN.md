@@ -44,8 +44,14 @@ Live tools: analyze_advisory, assess_project, plan_modernization, preview_change
 - H24 to H25: freeze, deploy check, record video (earlier rehearsal the night before).
 Each checkpoint ends with merge, tsc, tests, build, push, live check on the deployed server.
 
-## G. What the owner provides (secrets only in NitroCloud env / local env, never in chat)
-GitHub fine-grained token on metamorph-demo-legacy (contents, pull requests, actions, security events); Linear API key + team; Jira free site + API token; Slack and Discord webhooks; Resend key; n8n webhook URL; AWS free-tier account + read-only role (external id); Azure free account + read-only service principal. Needed by H4 for WS3/WS4/WS6, by H9 for the rest.
+## G. Whose credentials (tenancy model)
+Metamorph never uses its operator's accounts on behalf of users and never takes a user's secret through a tool argument (it would pass through the model and the logs).
+- **Per-organisation deployment (built now):** each organisation deploys its own instance and sets provider secrets in that instance's environment. Secrets are read only inside the connector, never returned, never logged. This is how the submission instance works, with our own test accounts.
+- **Artifact mode (default everywhere):** Metamorph returns the ticket, PR body or message payload; the client's own GitHub, Atlassian or Slack MCP submits it under the user's own login. Metamorph holds no credential at all.
+- **Cloud:** the customer creates a read-only role in their own account and trusts Metamorph's identity with an ExternalId (AWS cross-account AssumeRole; Azure federated credential or consented app). No customer key is stored.
+- **GitHub:** a GitHub App that the customer installs on chosen repos; Metamorph holds only the app private key and mints short-lived installation tokens. A fine-grained token is the single-organisation fallback.
+- **Multi-tenant OAuth vault (user connects Linear, Jira, Slack once, tokens stored encrypted per tenant):** not built for the freeze. It needs a database and a connect page outside the model. Listed in README as not built.
+For the submission instance we provide our own test-account credentials: GitHub token or App on metamorph-demo-legacy, Linear key, Jira site token, Slack/Discord webhooks, Resend key, n8n webhook, AWS read-only role, Azure read-only service principal. Judges get a read-scope Metamorph key only.
 
 ## H. Risks and cut line
 Risks: runner image size or tool install failures; workflow_dispatch input limit for large patches; Semgrep rules need network; AWS/Azure account setup time; MCP clients may not support elicitation or tool-called widget buttons; deploy limits (123s timeouts) for long runner polls (mitigation: progress notifications, resumable verify by run id).
