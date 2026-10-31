@@ -60,7 +60,7 @@ describe('toViewModel', () => {
     expect(toViewModel(JSON.stringify(plan)).kind).toBe('plan');
   });
 
-  it.each([null, undefined, 42, 'nope', [], {}, { score: 'x' }, { score: {} }, true])('returns empty for %j', (input) => {
+  it.each([null, undefined, [], {}, '', '   '])('returns empty for %j', (input) => {
     expect(toViewModel(input)).toEqual({ kind: 'empty' });
   });
 
@@ -70,7 +70,7 @@ describe('toViewModel', () => {
         throw new Error('boom');
       }
     };
-    expect(toViewModel(evil)).toEqual({ kind: 'empty' });
+    expect(toViewModel(evil).kind).toBe('unknown');
   });
 
   it('tolerates missing optional fields', () => {
@@ -199,13 +199,13 @@ describe('toViewModel apply', () => {
         throw new Error('boom');
       }
     };
-    expect(toViewModel(evil)).toEqual({ kind: 'empty' });
+    expect(toViewModel(evil).kind).toBe('unknown');
   });
 
   it('does not mistake a plan or assessment for an apply result', () => {
     expect(toViewModel(plan).kind).toBe('plan');
     expect(toViewModel(assessment).kind).toBe('assessment');
-    expect(toViewModel({ scoreBefore: 1, scoreAfter: 2 }).kind).toBe('empty');
+    expect(toViewModel({ scoreBefore: 1, scoreAfter: 2 }).kind).toBe('unknown');
   });
 });
 
@@ -288,7 +288,7 @@ describe('toViewModel report (generate_report output)', () => {
     expect((toViewModel({ ...report, files: [{ format: 'exe', bytes: 1 }] }) as ReportVM).files).toHaveLength(0);
     expect((toViewModel({ ...report, topFindings: Array.from({ length: 9 }, (_, i) => ({ severity: 'low', title: `t${i}` })) }) as ReportVM).topFindings).toHaveLength(3);
     expect(toViewModel({ reportId: 'x', files: 'nope', score: { overall: 1 } }).kind).toBe('assessment');
-    expect(toViewModel({ reportId: 'x', files: [], score: null }).kind).toBe('empty');
+    expect(toViewModel({ reportId: 'x', files: [], score: null }).kind).toBe('unknown');
   });
   it('formats sizes', () => {
     expect([formatBytes(12), formatBytes(2048), formatBytes(3 * 1024 * 1024)]).toEqual(['12 B', '2 KB', '3.0 MB']);

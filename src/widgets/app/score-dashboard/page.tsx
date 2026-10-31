@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
-import { scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
+import { outputFromMessage } from '../../lib/tool-output';
+import { UNRECOGNISED_HEADLINE, describeUnrecognised, scoreBand, toViewModel, unrecognisedDetail, type UnknownVM, type ViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
 import './dashboard.css';
 
 const R = 52;
@@ -583,8 +584,91 @@ function Plan({ vm }: { vm: PlanVM }) {
   );
 }
 
+function Unrecognised({ vm, renderError }: { vm: UnknownVM; renderError?: string }) {
+  return (
+    <div className="card state" role="alert">
+      <p>{UNRECOGNISED_HEADLINE}</p>
+      <p className="muted mono">{unrecognisedDetail(vm, renderError)}</p>
+    </div>
+  );
+}
+
+// A render error must be visible, never a blank or a fallback to the empty state.
+class ResultBoundary extends React.Component<{ raw: unknown; children: React.ReactNode }, { error?: string }> {
+  state: { error?: string } = {};
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? e.name : 'an error' };
+  }
+  componentDidUpdate(prev: { raw: unknown }) {
+    if (prev.raw !== this.props.raw && this.state.error) this.setState({ error: undefined });
+  }
+  render() {
+    if (this.state.error) return <Unrecognised vm={describeUnrecognised(this.props.raw)} renderError={this.state.error} />;
+    return this.props.children;
+  }
+}
+
+type OpenAiGlobal = { toolOutput?: unknown };
+
+// The host can hand over the result in the first injection, in a later one, or as a separate message, and the SDK
+// only re-renders on one of those. Listen for all of them and poll window.openai as a last resort.
+function useToolOutput(): unknown {
+  const [output, setOutput] = useState<unknown>(null);
+  useEffect(() => {
+    let seen: unknown;
+    const read = () => {
+      const v = (window as unknown as { openai?: OpenAiGlobal }).openai?.toolOutput;
+      if (v === undefined || v === null || v === seen) return;
+      seen = v;
+      setOutput(v);
+    };
+    const onMessage = (e: MessageEvent) => {
+      const v = outputFromMessage(e.data);
+      if (v !== undefined) setOutput(v);
+      // The SDK layout sets window.openai in its own listener; read again after it ran.
+      setTimeout(read, 0);
+      setTimeout(read, 150);
+    };
+    read();
+    window.addEventListener('message', onMessage);
+    for (const ev of ['openai:set_globals', 'openai:ready', 'mcp:ready']) window.addEventListener(ev, read);
+    const poll = setInterval(read, 400);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      for (const ev of ['openai:set_globals', 'openai:ready', 'mcp:ready']) window.removeEventListener(ev, read);
+      clearInterval(poll);
+    };
+  }, []);
+  return output;
+}
+
+function Body({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
+  switch (vm.kind) {
+    case 'empty':
+      return (
+        <div className="card state" role="status">
+          <p>No results yet.</p>
+          <p className="muted">Run assess_project, plan_modernization, apply_stage or generate_report to see results.</p>
+        </div>
+      );
+    case 'unknown':
+      return <Unrecognised vm={vm} />;
+    case 'plan':
+      return <Plan vm={vm} />;
+    case 'report':
+      return <Report vm={vm} open={open} />;
+    case 'apply':
+      return <Apply vm={vm} />;
+    case 'verify':
+      return <Verify vm={vm} />;
+    default:
+      return <Assessment vm={vm} />;
+  }
+}
+
 export default function ScoreDashboardPage() {
-  const { isReady, getToolOutput, theme, openExternal } = useWidgetSDK();
+  const { isReady, theme, openExternal } = useWidgetSDK();
+  const raw = useToolOutput();
 
   // Honour the host theme; without one the CSS falls back to prefers-color-scheme.
   useEffect(() => {
@@ -593,8 +677,8 @@ export default function ScoreDashboardPage() {
     else root.removeAttribute('data-theme');
   }, [theme]);
 
-  const raw = isReady ? getToolOutput<unknown>() : null;
   const vm = useMemo(() => toViewModel(raw), [raw]);
+  const loading = !isReady && raw === null;
   const open = (url: string) => {
     try {
       openExternal(url);
@@ -605,30 +689,19 @@ export default function ScoreDashboardPage() {
   const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'verify' ? 'Verification' : vm.kind === 'plan' ? 'Modernization plan' : vm.kind === 'apply' ? 'Projected result' : 'Modernization score';
 
   return (
-    <main className="sd" aria-busy={!isReady}>
+    <main className="sd" aria-busy={loading}>
       <h1>{title}</h1>
-      {!isReady ? (
+      {loading ? (
         <div className="card" role="status" aria-live="polite">
           <span className="sr-only">Loading results</span>
           <div className="skeleton w60" />
           <div className="skeleton w90" />
           <div className="skeleton w60" />
         </div>
-      ) : vm.kind === 'empty' ? (
-        <div className="card state" role="status">
-          <p>No results yet.</p>
-          <p className="muted">Run assess_project, plan_modernization, apply_stage or generate_report to see results.</p>
-        </div>
-      ) : vm.kind === 'plan' ? (
-        <Plan vm={vm} />
-      ) : vm.kind === 'report' ? (
-        <Report vm={vm} open={open} />
-      ) : vm.kind === 'apply' ? (
-        <Apply vm={vm} />
-      ) : vm.kind === 'verify' ? (
-        <Verify vm={vm} />
       ) : (
-        <Assessment vm={vm} />
+        <ResultBoundary raw={raw}>
+          <Body vm={vm} open={open} />
+        </ResultBoundary>
       )}
     </main>
   );

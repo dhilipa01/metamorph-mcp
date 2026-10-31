@@ -147,7 +147,14 @@ export interface EmptyVM {
   kind: 'empty';
 }
 
-export type ViewModel = AssessmentVM | PlanVM | ApplyVM | VerifyVM | ReportVM | EmptyVM;
+// Data arrived but is none of the known results. `empty` means nothing arrived at all.
+export interface UnknownVM {
+  kind: 'unknown';
+  shape: 'object' | 'array' | 'text' | 'other';
+  keys: string[];
+}
+
+export type ViewModel = AssessmentVM | PlanVM | ApplyVM | VerifyVM | ReportVM | EmptyVM | UnknownVM;
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 const RISKS: Risk[] = ['low', 'medium', 'high'];
@@ -409,39 +416,119 @@ function toReport(o: Record<string, unknown>, score: Record<string, unknown>): R
   };
 }
 
-export function toViewModel(output: unknown): ViewModel {
+// Shapes a host may wrap the tool result in. The widget SDK only unwraps structuredContent and a content array, so
+// {result: ...}, {data: ...}, a bare content array or a JSON string all used to land on the empty state.
+const WRAPPER_KEYS = ['structuredContent', 'result', 'data', 'output', 'toolOutput', 'payload', 'response', 'params'] as const;
+const MAX_UNWRAP_DEPTH = 5;
+const MAX_BLOCKS = 20;
+
+// Classify one object by its own fields. Undefined when it is none of the known results.
+function classify(o: Record<string, unknown>): ViewModel | undefined {
+  if (typeof o.reportId === 'string' && Array.isArray(o.files) && isObj(o.score) && num(o.score.overall) !== undefined) return toReport(o, o.score);
+  if (Array.isArray(o.stages)) {
+    return {
+      kind: 'plan',
+      stack: str(o.stack) ?? 'unknown',
+      goal: str(o.goal) ?? 'modernize_all',
+      scoreBefore: pct(o.scoreBefore),
+      scoreAfter: pct(o.scoreAfter),
+      stages: list(o.stages, MAX_STAGES, stage),
+      hint: str(o.hint)
+    };
+  }
+  if (o.mode === 'measured' && typeof o.verified === 'boolean' && isObj(o.patched)) return toVerify(o);
+  const before = pct(o.scoreBefore);
+  const after = pct(o.scoreAfter);
+  if (before !== undefined && after !== undefined && (o.mode === 'projected' || (isObj(o.stage) && Array.isArray(o.files)))) {
+    return toApply(o, before, after);
+  }
+  if (isObj(o.score) && num(o.score.overall) !== undefined) return toAssessment(o, o.score);
+  return undefined;
+}
+
+// Look for a known result in the value itself, then inside JSON text, content blocks and the usual wrapper keys.
+function search(v: unknown, depth: number): ViewModel | undefined {
+  if (depth > MAX_UNWRAP_DEPTH) return undefined;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t.startsWith('{') && !t.startsWith('[')) return undefined;
+    try {
+      return search(JSON.parse(t), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(v)) {
+    for (const el of v.slice(0, MAX_BLOCKS)) {
+      const hit = search(isObj(el) && typeof el.text === 'string' ? el.text : el, depth + 1);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (!isObj(v)) return undefined;
+  const own = classify(v);
+  if (own) return own;
+  for (const key of WRAPPER_KEYS) {
+    if (v[key] === undefined || v[key] === null) continue;
+    const hit = search(v[key], depth + 1);
+    if (hit) return hit;
+  }
+  for (const key of ['content', 'contents'] as const) {
+    if (Array.isArray(v[key])) {
+      const hit = search(v[key], depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+function isBlank(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.length === 0;
+  if (isObj(v)) return Object.keys(v).length === 0;
+  return false;
+}
+
+const MAX_KEYS = 20;
+const MAX_KEY_LENGTH = 40;
+
+// Top-level key NAMES only, capped. Never values: the result can hold paths, tokens or source text.
+export function describeUnrecognised(output: unknown): UnknownVM {
   try {
-    let o: unknown = output;
-    if (typeof o === 'string') {
+    const shape: UnknownVM['shape'] = typeof output === 'string' ? 'text' : Array.isArray(output) ? 'array' : isObj(output) ? 'object' : 'other';
+    let keys: string[] = [];
+    if (isObj(output)) keys = Object.keys(output);
+    else if (Array.isArray(output)) keys = [...new Set(output.slice(0, MAX_BLOCKS).flatMap((el) => (isObj(el) ? Object.keys(el) : [])))];
+    else if (typeof output === 'string') {
+      // JSON text: report the names inside it, never the text.
       try {
-        o = JSON.parse(o);
+        const parsed: unknown = JSON.parse(output);
+        if (isObj(parsed)) keys = Object.keys(parsed);
       } catch {
-        return { kind: 'empty' };
+        keys = [];
       }
     }
-    if (!isObj(o)) return { kind: 'empty' };
-    if (typeof o.reportId === 'string' && Array.isArray(o.files) && isObj(o.score) && num(o.score.overall) !== undefined) return toReport(o, o.score);
-    if (Array.isArray(o.stages)) {
-      return {
-        kind: 'plan',
-        stack: str(o.stack) ?? 'unknown',
-        goal: str(o.goal) ?? 'modernize_all',
-        scoreBefore: pct(o.scoreBefore),
-        scoreAfter: pct(o.scoreAfter),
-        stages: list(o.stages, MAX_STAGES, stage),
-        hint: str(o.hint)
-      };
-    }
-    if (o.mode === 'measured' && typeof o.verified === 'boolean' && isObj(o.patched)) return toVerify(o);
-    const before = pct(o.scoreBefore);
-    const after = pct(o.scoreAfter);
-    if (before !== undefined && after !== undefined && (o.mode === 'projected' || (isObj(o.stage) && Array.isArray(o.files)))) {
-      return toApply(o, before, after);
-    }
-    if (isObj(o.score) && num(o.score.overall) !== undefined) return toAssessment(o, o.score);
-    return { kind: 'empty' };
+    return { kind: 'unknown', shape, keys: keys.slice(0, MAX_KEYS).map((k) => (k.length > MAX_KEY_LENGTH ? `${k.slice(0, MAX_KEY_LENGTH - 1)}…` : k)) };
   } catch {
-    return { kind: 'empty' };
+    return { kind: 'unknown', shape: 'other', keys: [] };
+  }
+}
+
+export const UNRECOGNISED_HEADLINE = 'Received a result the dashboard does not recognise.';
+
+// The text the widget shows for an unclassified result. Key names only, never values.
+export function unrecognisedDetail(vm: UnknownVM, renderError?: string): string {
+  const keys = vm.keys.length > 0 ? `Top-level keys: ${vm.keys.join(', ')}.` : vm.shape === 'text' ? 'The result was text, not an object.' : vm.shape === 'array' ? 'The result was a list with no named keys.' : 'The result had no named keys.';
+  return renderError ? `${keys} Rendering failed with ${renderError}.` : keys;
+}
+
+export function toViewModel(output: unknown): ViewModel {
+  try {
+    if (isBlank(output)) return { kind: 'empty' };
+    return search(output, 0) ?? describeUnrecognised(output);
+  } catch {
+    return describeUnrecognised(output);
   }
 }
 
