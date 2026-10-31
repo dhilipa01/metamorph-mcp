@@ -39,10 +39,41 @@ The script exits 0 whenever it wrote `result.json`, including when checks fail. 
   `error` (tool could not run, timed out, or its output could not be parsed), `skipped` (not applicable or not selected).
 - `findings` are sorted by severity and capped at 500; `findingsTotal` and `findingsDropped` count the rest.
 - `buildOk` is true when every detected ecosystem installed (`composer-install` and/or `npm-ci` passed) and `tsc`, if it ran, passed.
+- `php` (optional, only when a `composer.json` was checked): `selected`/`version` (the PHP used for composer and phpunit), `constraint` and `constraintSource`
+  (`require.php`, `config.platform.php`, `composer.lock` or `default`), `reason`, `supported`, and `lockRegenerated`.
+  The older fields keep their meaning, so results without `php` stay valid.
 - `tests` is the sum over PHPUnit (junit xml) and the project's `npm test` (counts parsed from vitest/jest/node:test output; when the output is not recognised the counts stay 0 and the check summary says so).
 - Every string is passed through the secret redaction regexes (ported from `src/common/redact.ts`; keep them in sync).
 - Severity is the tool's own grade where it has one (SARIF `security-severity`, npm audit, checkov). Gitleaks findings are
   fixed at `high`, PHPStan at `low`, Rector at `info`, composer advisories default to `medium` because composer's JSON carries no grade.
+
+## PHP version selection
+
+The image runs `php` 8.4 by default and also has 7.4, 8.1 and 8.3 under `/opt/php/<ver>/` (each with a `shim/php` that selects its ini). `php-select.mjs` reads `composer.json`
+and `composer.lock` and chooses one; composer and phpunit run on it (PHPStan and Rector stay on 8.4, they analyse code statically).
+
+1. `require.php` filters the installed versions (caret, tilde, ranges, wildcards, `||`, hyphen ranges). Nothing left: the composer-install check is `error` with
+   `no supported PHP version for constraint X`, and nothing falls back to 8.4. A constraint the parser does not understand uses the default only if one is installed, and says so in `reason`.
+2. The `require.php` of every locked package narrows the list further (what composer's own platform check enforces), unless that would empty it.
+3. `config.platform.php` picks the nearest remaining version at or above it. Without it the lowest remaining version is used, because that is the one legacy pinned
+   dependencies are most likely to install on. No PHP constraint at all: the default, 8.4.
+
+**Stub `composer.lock`.** If any locked package has neither `dist` nor `source`, `composer install` cannot work. The runner then copies the project to a scratch directory (no `vendor`,
+`node_modules`, `.git`), deletes the lock there, and runs `composer update --no-scripts --no-plugins --no-interaction --no-progress --ignore-platform-reqs --no-security-blocking`
+on the selected PHP. `--no-security-blocking` is needed because composer 2.9+ refuses to install package versions that have security advisories; those are reported by `composer-audit` instead.
+The composer-install check is always `fail` in this case (so `buildOk` is false and nothing is `verified`), its summary says the lock was stub, what the fresh resolution did, and that the original lock did not build; `php.lockRegenerated` is true.
+phpunit then runs in the scratch copy if the resolution worked. `composer-audit` still audits the original lock.
+
+## Image publishing
+
+`.github/workflows/runner-image.yml` builds `runner/Dockerfile` and pushes `ghcr.io/<owner>/metamorph-runner` with the tags `<git sha>` and `latest`
+(on `workflow_dispatch` and on pushes to `main` that touch `runner/**`), using GitHub Actions layer caching. It is the only workflow with `packages: write`.
+All actions are pinned by commit SHA. The run summary records the digest.
+
+`metamorph-runner.yml` pulls the image (default tag `latest`, or the `image` input: another tag or `sha256:<digest>` to pin) and falls back to `docker build` if the pull fails; the log line and run summary
+say which path was used. **One-time step for the owner:** GitHub creates the package private, so set it to public: profile or organisation, **Packages**, **metamorph-runner**,
+**Package settings**, **Danger Zone**, **Change package visibility**, **Public**. Otherwise the pull fails (no login in the dispatch workflow) and every run builds locally.
+An image pulled by tag follows `latest`: pin by digest when you need reproducibility.
 
 ## Order of checks
 
@@ -51,11 +82,11 @@ and `node_modules/`. Then composer and PHP tools, then npm and Node tools.
 
 ## Image contents and size
 
-Base `php:8.4-cli-bookworm` (Debian 12). Pinned: Node 22.23.4, Composer 2.11.1, Trivy 0.76.1, Gitleaks 8.30.1,
+Base `php:8.4-cli-bookworm` (Debian 12), plus PHP 7.4 (from `php:7.4-cli-bullseye`, whose apt packages now come from archive.debian.org because Debian 11 is end of life), 8.1 and 8.3 taken from the official `php:<ver>-cli` images with the same extensions (zip, intl, bcmath, pdo_mysql, pcntl, exif), their shared libraries copied alongside (`bundle-php.sh`, libraries the base already has are dropped). Pinned: Node 22.23.4, Composer 2.11.1, Trivy 0.76.1, Gitleaks 8.30.1,
 Hadolint 2.15.1 (all sha256-verified against the project's published checksums), Semgrep 1.183.0 and Checkov 3.4.0
 (pip, exact version pin; PyPI publishes no per-release checksum we could pin ahead of time), PHPStan 2.3.4 and
 Rector 2.8.3 (composer, each in its own `/opt` project because Rector bundles its own PHPStan). The PHP base image
-tag is not digest-pinned. The measured image size is recorded in the "Measured" section below.
+tag is not digest-pinned. The measured image size is recorded in the "Measured" section below. Adding the three PHP versions grew the image from 2.62 GB to 2.75 GB on disk (+130 MB; compressed content 599 MB to 628 MB, +29 MB).
 
 The heavy scanners (semgrep, checkov, trivy) stay in the image; use `CHECKS=light` to skip them for a faster run.
 
@@ -68,7 +99,7 @@ The fallback rules are deliberately few; they are a safety net, not a replacemen
 
 ## GitHub Actions
 
-`.github/workflows/metamorph-runner.yml` (`workflow_dispatch`) builds the image and runs the same script on an
+`.github/workflows/metamorph-runner.yml` (`workflow_dispatch`) pulls the published image (see Image publishing; it builds locally if the pull fails) and runs the same script on an
 ephemeral VM, then uploads `result.json` as the `metamorph-result` artifact (retention 3 days).
 
 **Input size limit.** GitHub documents that the whole `workflow_dispatch` inputs payload can contain at most
@@ -79,7 +110,20 @@ stages / run the Docker image locally if you already compressed. A real regenera
 (58,729 bytes of diff, 78,308 base64 characters uncompressed) compresses to 7,760 characters with gzip -9 plus base64.
 The workflow also takes `request_id`, which appears in the run name so a dispatcher can find its run.
 
-## Measured
+## Measured with multiple PHP versions
+
+Same demo repo (`dhilipa01/metamorph-demo-legacy`), local Docker, full `CHECKS=all`, wall time 2:44 (php-shop) and 2:37 (php-shop-modernized). Fixtures: `tests/fixtures/runner/php-shop-after-php74.json`
+(php-shop at the repo head, no patch) and `php-shop-modernized-php84.json`.
+
+| Project | PHP chosen | composer-install | buildOk | phpunit |
+|---|---|---|---|---|
+| php-shop (`require.php >=7.2`, stub lock) | 7.4.33 | `fail`: stub lock, fresh `composer update` on 7.4 installed ok in 7.2 s, original lock reported as not built | false | skipped: no phpunit config |
+| php-shop-modernized (`require.php ^8.4`, stub lock) | 8.4.27 | `fail`: same stub-lock path | false | skipped: no phpunit config |
+
+Before this change php-shop failed because `symfony/http-kernel 4.4.0` needs PHP ^7.1.3 and the image only had 8.4; on 7.4 the dependencies now resolve and install. `buildOk` stays false on purpose because
+the committed lock is a stub. The multi-PHP run did not exercise phpunit: neither demo project has tests. The earlier measurements below were taken with the single-PHP image.
+
+## Measured (earlier, single PHP 8.4 image)
 
 
 Image `metamorph-runner`: **2.62 GB** on disk (amd64). Largest layers: Semgrep venv about 706 MB, Checkov venv about 254 MB,
