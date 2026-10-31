@@ -6,6 +6,7 @@ import { PlanningModule } from './modules/planning/planning.module.js';
 import { FeedsModule } from './modules/feeds/feeds.module.js';
 import { ReportModule } from './modules/report/report.module.js';
 import { VerifyModule } from './modules/verify/verify.module.js';
+import { CloudModule } from './modules/cloud/cloud.module.js';
 
 /**
  * Root Application Module
@@ -33,7 +34,8 @@ import { VerifyModule } from './modules/verify/verify.module.js';
     PlanningModule,
     FeedsModule,
     ReportModule,
-    VerifyModule
+    VerifyModule,
+    CloudModule
   ],
   providers: [
     // Health Checks
