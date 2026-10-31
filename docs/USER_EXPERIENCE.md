@@ -33,14 +33,14 @@ OPEN: how a new user obtains a key (the owner issues keys today).
 ## 6. Honest failure behaviour (each needs a defined message and a test)
 | Situation | Required behaviour |
 |---|---|
-| Large repo or monorepo | Stop at the existing size/file limits, say which limit was hit and suggest the `subfolder` option; never silently assess part of it |
-| No lockfile | Say versions are approximate (already flagged in the assessment) and that verification is weaker |
+| Large repo or monorepo | Stop at the existing size/file limits, say which limit was hit and suggest the `subfolder` option; never silently assess part of it. Implemented for projects: manifests up to 3 levels deep, at most 5 assessed, the rest and the ignored ones named in `notes`; no manifest at the root is stated, and the planning/report tools refuse to act on an empty root |
+| No lockfile | Say versions are approximate (already flagged in the assessment) and that verification is weaker. Implemented: such findings are marked `(version range, no lockfile)`, flagged low confidence and count at half weight in the score |
 | No tests | Report "unverified: no tests found". Never show a green check or a verified label |
 | Flaky tests | Rerun once; if results differ, report "flaky" with both outcomes; never count as pass |
 | Runner timeout | Report the timeout, which checks finished, and the run id so the user can resume or fetch the result |
-| Feed or scanner unavailable | Name it as unavailable in the result; the rest still returns (already how `check_watch` works) |
+| Feed or scanner unavailable | Name it as unavailable in the result; the rest still returns (already how `check_watch` works). The OSV check has a 60 s budget: it returns what it has and states "Checked X of Y dependencies" with the unchecked production/dev counts |
 | Patch fails to apply or build fails after patch | Say so, show the failing step, return no success label |
-| Secrets found | Show key names and file paths only, never values; list the rotation and history-purge steps (already built for committed env files) |
+| Secrets found | Show key names and file paths only, never values; list the rotation and history-purge steps (already built for committed env files). Secrets in source (AWS key id, private key block, GitHub token) show file:line and the key type only |
 
 ## 7. Caveats that must appear in output or README
 - A score of 100 means nothing our checks detect, not "modern" or "secure".
