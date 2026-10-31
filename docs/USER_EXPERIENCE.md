@@ -45,6 +45,7 @@ OPEN: how a new user obtains a key (the owner issues keys today).
 ## 7. Caveats that must appear in output or README
 - A score of 100 means nothing our checks detect, not "modern" or "secure".
 - Projected numbers are estimates; only runner results are measured.
+- There are two scores and they cover different things: the static assessment score (repository files, hosting checks, OSV advisories) and the measured score (what the runner tools reported, deduplicated across tools, labelled "measured by runner tools"). `verify_patch` and the report's Verification section show the measured baseline and patched score when both runs completed; a good measured score never means "verified".
 - Removing a committed `.env` from the repo does not remove the secret from git history; rotate every secret.
 - Findings for which no automated fix exists are guidance only.
 - Results depend on advisory data (OSV and feeds) available at the time of the call; each result carries source and fetch time where built.
