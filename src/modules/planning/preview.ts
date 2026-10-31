@@ -3,7 +3,7 @@
 import { canonicalHash, signApprovalToken } from '../../common/approval-token.js';
 import { redact } from '../../common/redact.js';
 import type { FilePatch, ModernizationPlan, PlanStage } from '../assessment/types.js';
-import { unifiedDiff } from './patches.js';
+import { ENV_EXAMPLE, isKeyOnlyLine, unifiedDiff } from './patches.js';
 
 const MAX_DIFF_LINES = 400;
 const MIN_SECRET_LEN = 32;
@@ -35,13 +35,21 @@ function action(p: FilePatch): 'create' | 'edit' | 'delete' {
 }
 
 const isEnvFile = (path: string) => (path.split('/').pop() ?? '').startsWith('.env');
+const isEnvTemplate = (path: string) => ENV_EXAMPLE.test(path);
 
+// Env files show only a header (key-only templates excepted). The one exception is a template (.env.example) whose ADDED lines are all key-only
+// (KEY= with no value): its diff is what the user needs to apply the patch, and it can hold no secret value.
 function patchDiff(p: FilePatch): string {
   if (!isEnvFile(p.path)) return unifiedDiff(p.path, p.before, p.after, Number.MAX_SAFE_INTEGER);
+  if (isEnvTemplate(p.path) && p.after !== null) {
+    const diff = unifiedDiff(p.path, p.before, p.after, Number.MAX_SAFE_INTEGER);
+    const added = diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+    if (added.every((l) => isKeyOnlyLine(l.slice(1)))) return diff;
+  }
   return `--- ${p.before === undefined ? '/dev/null' : `a/${p.path}`}\n+++ ${p.after === null ? '/dev/null' : `b/${p.path}`}\n(content hidden: env file)\n`;
 }
 
-// Combined unified diff of all patches, capped at maxLines. Env files show only a header.
+// Combined unified diff of all patches, capped at maxLines. Env files show only a header (key-only templates excepted).
 export function renderDiff(patches: FilePatch[], maxLines: number): string {
   const lines = patches
     .map(patchDiff)

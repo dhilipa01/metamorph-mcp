@@ -182,24 +182,86 @@ function runtimePatches(input: PatchInput): Draft[] {
   return out;
 }
 
-const ENV_EXAMPLE = /\.(example|sample|template|dist)$/;
+export const ENV_EXAMPLE = /\.(example|sample|template|dist)$/i;
+const EXAMPLE_PATH = '.env.example';
+const KEY_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]{0,63})\s*=/;
+const KEY_ONLY_LINE = /^(?:#[^=]*|\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_.-]{0,63}=\s*|\s*)$/;
+
+// Top-level env files that are not templates (these are the committed-secret candidates).
+export function committedEnvFiles(files: Record<string, string>): string[] {
+  return Object.keys(files)
+    .filter((path) => !path.includes('/') && /^\.env(\..+)?$/.test(path) && !ENV_EXAMPLE.test(path) && readable(files, path) !== undefined)
+    .sort();
+}
+
+// Variable names only, in order of first appearance. Values and comments are never read into the result.
+export function envKeyNames(text: string): string[] {
+  const keys: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(KEY_LINE);
+    if (m && !keys.includes(m[1])) keys.push(m[1]);
+  }
+  return keys;
+}
+
+// True when a (diff) line carries no value: a bare KEY=, a comment without "=", or blank.
+export function isKeyOnlyLine(line: string): boolean {
+  return KEY_ONLY_LINE.test(line);
+}
+
+// POSIX single-quote a path only when needed, so a crafted file name cannot inject shell syntax.
+export function shellQuote(path: string): string {
+  return /^[A-Za-z0-9._\/-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+function ignoresEnv(ignore: string | undefined): boolean {
+  const lines = new Set((ignore ?? '').split(/\r?\n/).map((l) => l.trim()));
+  return lines.has('.env*') || (lines.has('.env') && lines.has('.env.*'));
+}
+
+// Projection only: a patch cannot untrack a file, so `git rm --cached` is simulated by dropping the file from the copy.
+// Done only when the (patched) .gitignore covers env files.
+export function untrackCommittedEnv(patched: Record<string, string>, original: Record<string, string>): { files: Record<string, string>; untracked: string[] } {
+  if (!ignoresEnv(patched['.gitignore'])) return { files: patched, untracked: [] };
+  const untracked = committedEnvFiles(original);
+  const files = { ...patched };
+  for (const path of untracked) delete files[path];
+  return { files, untracked };
+}
 
 function envPatches(input: PatchInput): Draft[] {
   const { files } = input;
   const out: Draft[] = [];
-  for (const path of Object.keys(files).sort()) {
-    if (path.includes('/') || !/^\.env(\..+)?$/.test(path) || ENV_EXAMPLE.test(path)) continue;
-    if (readable(files, path) === undefined) continue;
-    out.push({ path, before: files[path], after: null, reason: `Remove ${path} from the repository and rotate any real secrets it held.` });
+  const envFiles = committedEnvFiles(files);
+  if (envFiles.length === 0) return out;
+
+  // .env.example: KEY names only. Existing lines are never rewritten; missing keys are appended with blank values.
+  const keys: string[] = [];
+  for (const path of envFiles) for (const k of envKeyNames(files[path])) if (!keys.includes(k)) keys.push(k);
+  const example = files[EXAMPLE_PATH];
+  if (keys.length > 0 && (example === undefined || Buffer.byteLength(example) <= MAX_FILE_BYTES)) {
+    const have = new Set(envKeyNames(example ?? ''));
+    const add = keys.filter((k) => !have.has(k));
+    if (add.length > 0) {
+      const base = example === undefined || example === '' || example.endsWith('\n') ? (example ?? '') : `${example}\n`;
+      const lines = add.map((k) => `${k}=`).join('\n');
+      out.push({
+        path: EXAMPLE_PATH,
+        before: example,
+        after: `${base}${lines}\n`,
+        reason: `Record the variable names from ${envFiles.join(', ')} in .env.example with blank values. No value is copied.`
+      });
+    }
   }
-  if (out.length === 0) return out;
+
   const ignore = files['.gitignore'];
-  if (ignore !== undefined && Buffer.byteLength(ignore) > MAX_FILE_BYTES) return out;
-  const present = new Set((ignore ?? '').split(/\r?\n/).map((l) => l.trim()));
-  const missing = IGNORE_LINES.filter((l) => !present.has(l));
-  if (missing.length > 0) {
-    const base = ignore === undefined || ignore === '' || ignore.endsWith('\n') ? (ignore ?? '') : `${ignore}\n`;
-    out.push({ path: '.gitignore', before: ignore, after: `${base}${missing.join('\n')}\n`, reason: 'Ignore environment files so they are not committed again.' });
+  if (ignore === undefined || Buffer.byteLength(ignore) <= MAX_FILE_BYTES) {
+    const present = new Set((ignore ?? '').split(/\r?\n/).map((l) => l.trim()));
+    const missing = IGNORE_LINES.filter((l) => !present.has(l));
+    if (missing.length > 0) {
+      const base = ignore === undefined || ignore === '' || ignore.endsWith('\n') ? (ignore ?? '') : `${ignore}\n`;
+      out.push({ path: '.gitignore', before: ignore, after: `${base}${missing.join('\n')}\n`, reason: 'Ignore environment files so they are not committed again.' });
+    }
   }
   return out;
 }

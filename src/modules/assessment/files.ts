@@ -74,6 +74,18 @@ async function readBounded(abs: string, maxBytes: number, skipLarge: boolean): P
   }
 }
 
+const ENV_TEMPLATE = /\.(example|sample|template|dist)$/i;
+
+// Variable names of a dotenv file as bare `KEY=` lines; values and comments are dropped.
+function keysOnly(text: string): string {
+  const keys: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]{0,63})\s*=/);
+    if (m && !keys.includes(m[1])) keys.push(m[1]);
+  }
+  return keys.map((k) => `${k}=\n`).join('');
+}
+
 export async function readKeyFiles(dir: string, limits?: Partial<ReadLimits>): Promise<KeyFiles> {
   const lim: ReadLimits = { ...DEFAULT_READ_LIMITS, ...limits };
   let rootStat: Stats;
@@ -117,10 +129,13 @@ export async function readKeyFiles(dir: string, limits?: Partial<ReadLimits>): P
         return result;
       }
       result.paths.push(childRel);
-      if (KEY_FILES.includes(name)) {
+      const topLevelEnv = rel === '' && /^\.env(\..+)?$/.test(name);
+      // Top-level env files and .gitignore are kept so the env stage can list variable NAMES and check ignore rules.
+      // A real env file is reduced to `KEY=` lines on read: its values never leave this function.
+      if (KEY_FILES.includes(name) || topLevelEnv || (rel === '' && name === '.gitignore')) {
         if (PRESENCE_ONLY.has(name)) continue;
         const text = await readBounded(abs, lim.maxFileBytes, true);
-        if (text !== null) result.contents[childRel] = text;
+        if (text !== null) result.contents[childRel] = topLevelEnv && !ENV_TEMPLATE.test(name) ? keysOnly(text) : text;
       } else if (name.endsWith('.php') && result.php.length < lim.maxPhpFiles) {
         const text = await readBounded(abs, lim.maxPhpBytes, false);
         if (text !== null) result.php.push({ path: childRel, content: text });

@@ -7,7 +7,7 @@ import { redact } from '../../common/redact.js';
 import { resolveInside } from '../../common/safe-archive.js';
 import { assessFull, type Analyzer } from '../assessment/assess.js';
 import type { DependencyFix, FilePatch, Finding, Goal, PlanStage, Severity } from '../assessment/types.js';
-import { applyPatches, generatePatches } from './patches.js';
+import { applyPatches, envKeyNames, generatePatches, shellQuote, untrackCommittedEnv } from './patches.js';
 import { buildPlan } from './plan.js';
 import { renderDiff } from './preview.js';
 
@@ -132,6 +132,10 @@ export interface ApplyResultInput {
   filesAfter: Record<string, string>;
   before: { score: number; findings: Finding[] };
   after: { score: number; findings: Finding[] };
+  // Env files that the projection treated as untracked (`git rm --cached`); they are not part of the patch.
+  untracked?: string[];
+  // Variable NAMES (never values) held by those files, to rotate.
+  envKeys?: string[];
 }
 
 function changedPaths(before: Record<string, string>, after: Record<string, string>): string[] {
@@ -147,14 +151,32 @@ function lockStep(files: Record<string, string>): string {
   return 'Run npm install or composer update to refresh the lockfile.';
 }
 
+const ENV_NOTE =
+  ' The committed-env finding clears only after you run git rm --cached on each env file: a patch cannot untrack a file, so the projection simply removes it from the temporary copy once .gitignore covers it. The patch never deletes your local env file and never contains its values.';
+
+function envSteps(untracked: string[], keys: string[]): string[] {
+  const names = keys.length > 0 ? keys.join(', ') : '(see .env.example)';
+  return [
+    ...untracked.map((p) => `Run: git rm --cached ${shellQuote(p)}`),
+    `Rotate every secret that was in the env file(s), they are exposed in git history. Keys: ${names}`,
+    ...untracked.map(
+      (p) => `Purge history: git filter-repo --path ${shellQuote(p)} --invert-paths (WARNING: this rewrites history and needs a force-push by a human; coordinate with all clone owners)`
+    )
+  ];
+}
+
 export function buildApplyResult(input: ApplyResultInput): ApplyResult {
   const { stage, patches, filesBefore, filesAfter, before, after } = input;
+  const untracked = input.untracked ?? [];
+  const envLines = untracked.length > 0 ? envSteps(untracked, input.envKeys ?? []) : [];
   const afterIds = new Set(after.findings.map((f) => f.id));
   return {
     stage: { id: stage.id, index: stage.index, title: stage.title, risk: stage.risk },
     applied: true,
     mode: 'projected',
-    files: changedPaths(filesBefore, filesAfter).map((p) => ({
+    files: changedPaths(filesBefore, filesAfter)
+      .filter((p) => !untracked.includes(p))
+      .map((p) => ({
       path: p,
       action: !(p in filesAfter) ? 'delete' : !(p in filesBefore) ? 'create' : 'edit'
     })),
@@ -167,12 +189,13 @@ export function buildApplyResult(input: ApplyResultInput): ApplyResult {
     howToApply: [
       'Save the patch as fix.patch in the root of your project.',
       'Run: git apply fix.patch',
+      ...envLines.map((l) => redact(l).text),
       lockStep(filesBefore),
       'Run your tests.',
       'Commit and push.',
       'Call assess_project again to confirm the real score.'
     ],
-    note: 'Projected result: the changes were applied to a temporary copy and lockfile versions were updated the way an install would record them. Nothing in your repository was changed. Apply the patch yourself, then assess_project shows the real score.'
+    note: 'Projected result: the changes were applied to a temporary copy and lockfile versions were updated the way an install would record them. Nothing in your repository was changed. Apply the patch yourself, then assess_project shows the real score.' + (untracked.length > 0 ? ENV_NOTE : '')
   };
 }
 
@@ -221,7 +244,11 @@ export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<
   // Patches may touch files the assessment does not keep (for example .env): start from their recorded contents too.
   const base = { ...full.files };
   for (const p of patches) if (p.before !== undefined && !(p.path in base)) base[p.path] = p.before;
-  const filesAfter = refreshLocks(applyPatches(base, patches), full.fixes);
+  const patched = applyPatches(base, patches);
+  const projected = stage.id === 'remove-committed-env' ? untrackCommittedEnv(patched, base) : { files: patched, untracked: [] as string[] };
+  const filesAfter = refreshLocks(projected.files, full.fixes);
+  const envKeys: string[] = [];
+  for (const f of projected.untracked) for (const k of envKeyNames(base[f])) if (!envKeys.includes(k)) envKeys.push(k);
   await writeChanged(dir, base, filesAfter);
   const again = await assessFull(dir, assess);
   return buildApplyResult({
@@ -230,6 +257,8 @@ export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<
     filesBefore: base,
     filesAfter,
     before: { score: full.assessment.score.overall, findings: full.findings },
-    after: { score: again.assessment.score.overall, findings: again.findings }
+    after: { score: again.assessment.score.overall, findings: again.findings },
+    untracked: projected.untracked,
+    envKeys
   });
 }

@@ -1,4 +1,5 @@
 import { scoreFindings } from '../assessment/score.js';
+import { shellQuote } from './patches.js';
 import { SEVERITY_RANK } from '../assessment/types.js';
 import type { DependencyFix, Finding, Goal, ModernizationPlan, PlanStage, StageKind } from '../assessment/types.js';
 
@@ -47,8 +48,8 @@ const DEFS: Def[] = [
     rollback: 'Switch the runtime version back to the previous one and redeploy.',
   },
   {
-    id: 'remove-committed-env', title: 'Remove the committed env file', kind: 'packaging', automated: true, risk: 'low',
-    ids: ['env-file-committed'], rollback: 'Restore the file from version control history if it is still needed.',
+    id: 'remove-committed-env', title: 'Stop committing the env file', kind: 'packaging', automated: true, risk: 'low',
+    ids: ['env-file-committed'], rollback: 'Revert the patch. Your local env file is never deleted; rotated secrets stay rotated.',
   },
   {
     id: 'remove-deprecated', title: 'Replace deprecated packages', kind: 'dependencies', automated: false, risk: 'medium',
@@ -119,6 +120,16 @@ function dependencyRisk(fixes: DependencyFix[]): Risk {
   return crossing > 0 ? 'medium' : 'low';
 }
 
+function envSteps(matched: Finding[]): string[] {
+  const paths = [...new Set(matched.map((f) => f.evidence).filter((e): e is string => typeof e === 'string' && e.length > 0))].sort();
+  return [
+    'Apply the patch: it adds .env, .env.* and !.env.example to .gitignore and records the variable names (no values) in .env.example. It never deletes your local env file.',
+    ...paths.map((p) => `Run: git rm --cached ${shellQuote(p)}`),
+    'Rotate every secret the env file held (the variable names are listed in .env.example); treat them all as exposed.',
+    ...paths.map((p) => `Purge history: git filter-repo --path ${shellQuote(p)} --invert-paths (WARNING: rewrites history and needs a force-push by a human; coordinate with everyone who has a clone)`)
+  ];
+}
+
 function stepsFor(id: string, matched: Finding[], fixes: DependencyFix[]): string[] {
   switch (id) {
     case 'patch-dependencies':
@@ -128,7 +139,7 @@ function stepsFor(id: string, matched: Finding[], fixes: DependencyFix[]): strin
     case 'upgrade-runtime':
       return [`Upgrade Node to ${TARGET_NODE} and PHP to ${TARGET_PHP} where they are used`, 'Run the test suite on the new runtime'];
     case 'remove-committed-env':
-      return ['Stop tracking the env file in version control', 'Add it to .gitignore', 'Rotate any real secret it contained'];
+      return envSteps(matched);
     case 'add-packaging':
       return ['Add a Dockerfile', 'Add a CI workflow'];
     default:
@@ -165,7 +176,8 @@ export function buildPlan(input: PlanInput): ModernizationPlan {
       automated: meta.automated,
       risk: meta.risk,
       addresses,
-      steps: steps.slice(0, MAX_STEPS),
+      // The env stage lists one git command per env file; truncating would drop required rotation/purge steps.
+      steps: meta.id === 'remove-committed-env' ? steps : steps.slice(0, MAX_STEPS),
       rollback: meta.rollback,
       scoreAfter: scoreFindings(findings.filter((f) => !done.has(f.id))).overall,
     });

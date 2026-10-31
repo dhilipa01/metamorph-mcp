@@ -74,12 +74,12 @@ describe('readKeyFiles', () => {
     expect(r.truncated).toBe(false);
   });
 
-  it('lists .env paths but never reads their content', async () => {
+  it('lists .env paths and keeps variable names only, never values', async () => {
     await writeFile(join(root, '.env'), 'API_KEY=super-secret-value');
     await writeFile(join(root, '.env.production'), 'TOKEN=another-secret');
     const r = await readKeyFiles(root);
     expect(r.paths).toEqual(['.env', '.env.production']);
-    expect(r.contents).toEqual({});
+    expect(r.contents).toEqual({ '.env': 'API_KEY=\n', '.env.production': 'TOKEN=\n' });
     expect(JSON.stringify(r)).not.toContain('secret');
   });
 

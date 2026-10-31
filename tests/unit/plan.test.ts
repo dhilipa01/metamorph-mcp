@@ -70,6 +70,16 @@ describe('buildPlan stages', () => {
     expect(by['add-packaging'].risk).toBe('low');
   });
 
+  it('env stage steps untrack, rotate and purge history per env file without truncation', () => {
+    const envs = ['.env', '.env.local', '.env.production', '.env.staging', '.env.test'].map((e) => ({ ...f('env-file-committed', 'high', 'security'), evidence: e }));
+    const s = buildPlan({ stack: 'node', findings: envs, fixes: [], goal: 'modernize_all' }).stages.find((x) => x.id === 'remove-committed-env')!;
+    for (const e of ['.env', '.env.local', '.env.production', '.env.staging', '.env.test']) {
+      expect(s.steps).toContain(`Run: git rm --cached ${e}`);
+      expect(s.steps.some((x) => x.startsWith(`Purge history: git filter-repo --path ${e} --invert-paths`) && /force-push/.test(x))).toBe(true);
+    }
+    expect(s.steps.some((x) => /^Rotate every secret/.test(x))).toBe(true);
+  });
+
   it('marks fix-security-code as manual and high risk', () => {
     const s = buildPlan({ stack: 'php', findings: phpShop, fixes: [], goal: 'modernize_all' }).stages.find((x) => x.id === 'fix-security-code');
     expect(s?.automated).toBe(false);

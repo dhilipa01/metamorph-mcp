@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalHash, signApprovalToken } from '../../src/common/approval-token.js';
@@ -224,5 +224,47 @@ describe('applyStageInDir end to end', () => {
     await expect(run(dir, 'x', 'nope')).rejects.toThrow(/Valid stage ids: .*patch-dependencies.*plan_modernization/);
     await expect(applyStageInDir(dir, { stage: 'patch-dependencies', token: 'x', goal: 'modernize_all', secret: undefined })).rejects.toThrow(/not configured/);
     expect(await snapshot(dir)).toEqual(before);
+  });
+});
+
+describe('remove-committed-env stage', () => {
+  const V = ['sk_live_' + 'abcdef123456', 'p4ss' + 'w0rd-value-9', 'AKIA' + 'ABCDEFGHIJKLMNOP'];
+  const ENV = `# creds\nSTRIPE_KEY=${V[0]}\nDB_PASSWORD=${V[1]}\nAWS_ID=${V[2]}\n`;
+
+  async function setup(extra: Record<string, string> = {}): Promise<string> {
+    const dir = await temp();
+    await writeNodeFixture(dir);
+    await writeFile(join(dir, '.env'), ENV);
+    for (const [k, v] of Object.entries(extra)) await writeFile(join(dir, k), v);
+    return dir;
+  }
+
+  it('keeps the local .env, emits no deletion, hides values, and tells the user how to finish', async () => {
+    const dir = await setup();
+    const r = await run(dir, await previewToken(dir, 'remove-committed-env'), 'remove-committed-env');
+    const out = JSON.stringify(r);
+    for (const v of V) expect(out).not.toContain(v);
+    expect(r.patch).not.toContain('/dev/null\n(content hidden');
+    expect(r.patch).not.toMatch(/\+\+\+ \/dev\/null/);
+    expect(r.patch).toContain('+STRIPE_KEY=');
+    expect(r.files.some((f) => f.action === 'delete')).toBe(false);
+    expect(r.files.map((f) => f.path)).toContain('.env.example');
+    expect(r.howToApply).toContain('Run: git rm --cached .env');
+    const text = r.howToApply.join('\n');
+    expect(text).toMatch(/Rotate.*STRIPE_KEY.*DB_PASSWORD.*AWS_ID/);
+    expect(text).toContain('git filter-repo --path .env --invert-paths');
+    expect(text).toMatch(/force-push/);
+    expect(r.note).toMatch(/git rm --cached/);
+    expect(r.findingsFixed).toContain('env-file-committed');
+    expect(r.scoreAfter).toBeGreaterThan(r.scoreBefore);
+    const after = await snapshot(dir); // the throwaway copy: the projection untracks .env, adds the example and ignore rules
+    expect(after['.env']).toBeUndefined();
+    expect(after['.env.example']).toBe('STRIPE_KEY=\nDB_PASSWORD=\nAWS_ID=\n');
+    expect(after['.gitignore']).toContain('.env.*');
+  });
+
+  it('is idempotent when .env.example already lists the keys and .gitignore covers env files', async () => {
+    const dir = await setup({ '.env.example': 'STRIPE_KEY=\nDB_PASSWORD=\nAWS_ID=\n', '.gitignore': 'node_modules\n.env\n.env.*\n!.env.example\n' });
+    await expect(run(dir, await previewToken(dir, 'remove-committed-env'), 'remove-committed-env')).rejects.toThrow(/Nothing to change/);
   });
 });

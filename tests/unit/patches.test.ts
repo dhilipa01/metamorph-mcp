@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { applyPatches, generatePatches, unifiedDiff } from '../../src/modules/planning/patches.js';
+import { applyPatches, generatePatches, unifiedDiff, untrackCommittedEnv } from '../../src/modules/planning/patches.js';
 import type { DependencyFix, FilePatch } from '../../src/modules/assessment/types.js';
 import { assessDirectory, type Analyzer } from '../../src/modules/assessment/assess.js';
 import { writeNodeFixture, writePhpFixture } from '../helpers/fixtures.js';
@@ -88,34 +88,57 @@ describe('upgrade-runtime', () => {
 });
 
 describe('remove-committed-env', () => {
-  it('deletes env files but leaves examples alone, and appends .env to .gitignore once', () => {
-    const files = { '.env': 'A=1\n', '.env.production': 'B=2\n', '.env.example': 'A=\n', '.env.sample': '', '.env.template': '', '.env.dist': '', '.gitignore': 'node_modules' };
+  const V1 = 'sk_live_' + 'abcdef123456';
+  const V2 = 'p4ss' + 'w0rd-value-9';
+  const V3 = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+  const ENV = `# database credentials\nDB_PASSWORD=${V2}\nexport STRIPE_KEY="${V1}"\nAWS_ID=${V3}\nEMPTY=\n`;
+
+  it('never deletes env files; writes a key-only .env.example and the ignore lines', () => {
+    const files = { '.env': ENV, '.env.production': 'B=2222\n', '.env.example': 'A=\n', '.env.sample': '', '.env.template': '', '.env.dist': '', '.gitignore': 'node_modules' };
     const patches = run(files, ['remove-committed-env']);
-    expect(patches.map((p) => [p.path, p.after])).toEqual([
-      ['.env', null],
-      ['.env.production', null],
-      ['.gitignore', 'node_modules\n.env\n.env.*\n!.env.example\n']
-    ]);
-    expect(patches[0].reason).toContain('rotate');
+    expect(patches.map((p) => p.path)).toEqual(['.env.example', '.gitignore']);
+    expect(patches.every((p) => p.after !== null)).toBe(true);
+    expect(patches[0].after).toBe('A=\nDB_PASSWORD=\nSTRIPE_KEY=\nAWS_ID=\nEMPTY=\nB=\n');
+    expect(patches[1].after).toBe('node_modules\n.env\n.env.*\n!.env.example\n');
+    const json = JSON.stringify(patches.map((p) => [p.reason, p.after]));
+    for (const v of [V1, V2, V3, '2222', 'database credentials']) expect(json).not.toContain(v);
     const next = applyPatches(files, patches);
-    expect(Object.keys(next).sort()).toEqual(['.env.dist', '.env.example', '.env.sample', '.env.template', '.gitignore']);
-    expect(run({ ...next, '.env': 'again' }, ['remove-committed-env']).map((p) => p.path)).toEqual(['.env']);
+    expect(next['.env']).toBe(ENV);
+    expect(next['.env.production']).toBe('B=2222\n');
   });
 
-  it('creates .gitignore when absent and ignores nested env files', () => {
-    const patches = run({ '.env.local': 'x', 'sub/.env': 'y' }, ['remove-committed-env']);
-    expect(patches.map((p) => p.path)).toEqual(['.env.local', '.gitignore']);
+  it('creates .env.example and .gitignore when absent and ignores nested env files', () => {
+    const patches = run({ '.env.local': 'X=1', 'sub/.env': 'Y=2' }, ['remove-committed-env']);
+    expect(patches.map((p) => p.path)).toEqual(['.env.example', '.gitignore']);
+    expect(patches[0]).toMatchObject({ before: undefined, after: 'X=\n' });
     expect(patches[1]).toMatchObject({ before: undefined, after: '.env\n.env.*\n!.env.example\n' });
   });
 
+  it('is idempotent: nothing to change once keys are listed and ignore lines exist', () => {
+    const files = { '.env': 'A=secret1\nB=secret2\n', '.env.example': 'A=\nB=\n', '.gitignore': '.env\n.env.*\n!.env.example\n' };
+    expect(run(files, ['remove-committed-env'])).toEqual([]);
+    const first = run({ '.env': 'A=secret1\nB=secret2\nC=s3\n', '.env.example': 'A=\nB=' }, ['remove-committed-env']);
+    expect(first[0].after).toBe('A=\nB=\nC=\n');
+    const next = applyPatches({ '.env': 'A=secret1\nB=secret2\nC=s3\n', '.env.example': 'A=\nB=' }, first);
+    expect(run(next, ['remove-committed-env'])).toEqual([]);
+  });
+
   it('adds only the missing ignore lines', () => {
-    const patches = run({ '.env': 'x', '.gitignore': '.env\n!.env.example' }, ['remove-committed-env']);
-    expect(patches[1].after).toBe('.env\n!.env.example\n.env.*\n');
-    expect(run({ '.env': 'x', '.gitignore': '.env\n.env.*\n!.env.example\n' }, ['remove-committed-env']).map((p) => p.path)).toEqual(['.env']);
+    const patches = run({ '.env': 'x=1', '.env.example': 'x=\n', '.gitignore': '.env\n!.env.example' }, ['remove-committed-env']);
+    expect(patches.map((p) => p.path)).toEqual(['.gitignore']);
+    expect(patches[0].after).toBe('.env\n!.env.example\n.env.*\n');
   });
 
   it('does nothing without env files', () => {
     expect(run({ '.env.example': 'A=', '.gitignore': '' }, ['remove-committed-env'])).toEqual([]);
+  });
+
+  it('untrackCommittedEnv drops env files from the copy only when .gitignore covers them', () => {
+    const files = { '.env': 'A=1', '.env.local': 'B=2', '.env.example': 'A=', '.gitignore': '.env\n.env.*\n!.env.example\n' };
+    const r = untrackCommittedEnv(files, files);
+    expect(r.untracked).toEqual(['.env', '.env.local']);
+    expect(Object.keys(r.files).sort()).toEqual(['.env.example', '.gitignore']);
+    expect(untrackCommittedEnv({ '.env': 'A=1', '.gitignore': 'node_modules\n' }, { '.env': 'A=1' })).toEqual({ files: { '.env': 'A=1', '.gitignore': 'node_modules\n' }, untracked: [] });
   });
 });
 
@@ -167,12 +190,12 @@ describe('add-packaging', () => {
 
 describe('generatePatches limits', () => {
   it('orders by stage then path and only handles known stage ids', () => {
-    const files = { 'package.json': '{"dependencies":{"a":"1.0.0"}}', '.env': 'x' };
+    const files = { 'package.json': '{"dependencies":{"a":"1.0.0"}}', '.env': 'K=x' };
     const patches = run(files, ['add-packaging', 'unknown-stage', 'remove-committed-env', 'upgrade-runtime', 'patch-dependencies'], [npm('a', '1.0.0', '2.0.0')]);
     expect(patches.map((p) => `${p.stageId}:${p.path}`)).toEqual([
       'patch-dependencies:package.json',
       'upgrade-runtime:.nvmrc',
-      'remove-committed-env:.env',
+      'remove-committed-env:.env.example',
       'remove-committed-env:.gitignore',
       'add-packaging:.github/workflows/ci.yml',
       'add-packaging:Dockerfile'
@@ -183,15 +206,14 @@ describe('generatePatches limits', () => {
   it('skips files over 256 KiB', () => {
     const big = `{"dependencies":{"a":"1.0.0"},"pad":"${'x'.repeat(256 * 1024)}"}`;
     expect(run({ 'package.json': big }, ['patch-dependencies'], [npm('a', '1.0.0', '2.0.0')])).toEqual([]);
-    expect(run({ '.env': 'x'.repeat(256 * 1024 + 1) }, ['remove-committed-env'])).toEqual([]);
+    expect(run({ '.env': 'K=' + 'x'.repeat(256 * 1024 + 1) }, ['remove-committed-env'])).toEqual([]);
   });
 
-  it('caps the result at 20 patches', () => {
+  it('yields one key-only example and one ignore patch however many env files exist', () => {
     const files: Record<string, string> = {};
-    for (let i = 0; i < 30; i++) files[`.env.f${String(i).padStart(2, '0')}`] = 'x';
+    for (let i = 0; i < 30; i++) files[`.env.f${String(i).padStart(2, '0')}`] = `K${i}=x`;
     const patches = run(files, ['remove-committed-env']);
-    expect(patches).toHaveLength(20);
-    expect(patches[19].path).toBe('.env.f19');
+    expect(patches.map((p) => p.path)).toEqual(['.env.example', '.gitignore']);
   });
 });
 
@@ -307,7 +329,9 @@ describe('integration with the assessor', () => {
       const files = await load(dir);
       const patches = generatePatches({ stack, files, fixes, stageIds: ALL });
       expect(patches.length).toBeGreaterThan(0);
-      await sync(dir, files, applyPatches(files, patches));
+      const patched = applyPatches(files, patches);
+      // `git rm --cached` is not expressible as a patch: simulate it once .gitignore covers the env file.
+      await sync(dir, files, untrackCommittedEnv(patched, files).files);
       const after = await assessDirectory(dir, { analyze: clean, today });
       const ids = new Set(after.topFindings.map((f) => f.id));
       const beforeIds = new Set(before.topFindings.map((f) => f.id));

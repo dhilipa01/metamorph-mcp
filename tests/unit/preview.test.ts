@@ -109,8 +109,16 @@ describe('buildPreview', () => {
     });
 
     it('hides content of edited env files too', () => {
-      const p = run([{ path: '.env.example', before: envText, after: envText + 'X=1\n', reason: 'edit', stageId: 'patch-dependencies' }], SECRET);
-      expect(p.diff).toBe('--- a/.env.example\n+++ b/.env.example\n(content hidden: env file)\n');
+      const p = run([{ path: '.env.production', before: envText, after: envText + 'X=1\n', reason: 'edit', stageId: 'patch-dependencies' }], SECRET);
+      expect(p.diff).toBe('--- a/.env.production\n+++ b/.env.production\n(content hidden: env file)\n');
+    });
+
+    it('shows a key-only .env.example diff but hides one that adds a value', () => {
+      const ok = run([{ path: '.env.example', before: 'A=\n', after: 'A=\nB=\n', reason: 'keys', stageId: 'remove-committed-env' }], SECRET);
+      expect(ok.diff).toContain('+B=');
+      const bad = run([{ path: '.env.example', before: 'A=\n', after: `A=\nB=${PW}\n`, reason: 'oops', stageId: 'remove-committed-env' }], SECRET);
+      expect(bad.diff).toBe('--- a/.env.example\n+++ b/.env.example\n(content hidden: env file)\n');
+      expect(JSON.stringify(bad)).not.toContain(PW);
     });
 
     it('redacts secret-looking values in other files and notes it', () => {
