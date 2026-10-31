@@ -3,6 +3,7 @@ import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { assessFull } from '../assessment/assess.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
+import { applyStageInDir } from './apply.js';
 import { generatePatches } from './patches.js';
 import { buildPlan } from './plan.js';
 import { buildPreview } from './preview.js';
@@ -17,6 +18,7 @@ interface Input {
   goal?: Goal;
   subfolder?: string;
   stage?: string;
+  approval_token?: string;
 }
 
 export class PlanningTools {
@@ -111,5 +113,42 @@ export class PlanningTools {
         throw new Error(`${e.message} Call plan_modernization first (with the same goal, "${goal}") and pass one of its stage ids as "stage".`);
       }
     });
+  }
+
+  @Tool({
+    name: 'apply_stage',
+    description:
+      'Apply one automated stage to a throwaway copy of the repository and return the patch plus a PROJECTED before/after score. Needs the approvalToken from preview_changes. Your repository is never modified and no project code is run: save the returned patch, run git apply, refresh the lockfile, then call assess_project to confirm.',
+    inputSchema: z.object({
+      repo_url: z.string().min(10).max(300).describe(REPO_DESC),
+      stage: z.string().min(1).max(60).describe('Stage id from plan_modernization, e.g. patch-dependencies'),
+      approval_token: z.string().min(1).max(2048).describe('approvalToken returned by preview_changes for this stage (valid for 5 minutes)'),
+      goal: z.enum(GOALS).optional().describe(GOAL_DESC),
+      subfolder: z.string().max(200).optional().describe(SUB_DESC)
+    }),
+    examples: {
+      request: { repo_url: 'https://github.com/owner/legacy-app', stage: 'patch-dependencies', approval_token: '<approvalToken from preview_changes>' },
+      response: {
+        stage: { id: 'patch-dependencies', index: 1, title: 'Patch vulnerable dependencies', risk: 'low' },
+        applied: true,
+        mode: 'projected',
+        files: [{ path: 'package.json', action: 'edit' }],
+        scoreBefore: 52,
+        scoreAfter: 64,
+        scoreDelta: 12,
+        findingsFixed: ['dep-vulnerable:lodash'],
+        remaining: [{ id: 'node-runtime-eol', severity: 'high', title: 'Node 10 is end of life' }],
+        patch: '--- a/package.json\n+++ b/package.json\n@@ -1,3 +1,3 @@\n...',
+        howToApply: ['Save the patch as fix.patch in the root of your project.', 'Run: git apply fix.patch']
+      }
+    }
+  })
+  @UseGuards(scopeGuard('write'))
+  async applyStage(input: Input & { stage: string; approval_token: string }, ctx: ExecutionContext) {
+    const goal = input.goal ?? 'modernize_all';
+    ctx.logger.info('apply_stage', { goal, stage: input.stage });
+    return withRepo(input.repo_url, input.subfolder, ctx, (dir) =>
+      applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET })
+    );
   }
 }
