@@ -7,7 +7,7 @@ Teams that own legacy PHP or Node apps (mostly private repos) and need to know w
 
 ## 2. Value order (build and demo in this order)
 1. **Triage across everything**: dependencies, runtime end-of-life dates, code risks, secrets, Docker/CI. Ranked by whether a flaw is being exploited now (CISA known-exploited list) and how likely it is (EPSS), then severity; not by raw count.
-   - Build status: the data fields exist on findings (kev, epss, cvss, cwe, owasp). The ranking itself is not built: today findings and `topFindings` sort by severity only. TODO: sort and group by exploited, then EPSS, then severity, and show why each item is ranked where it is.
+   - Build status: the data fields exist on findings (kev, epss, cvss, cwe, owasp). The ranking is built (src/modules/assessment/rank.ts): known-exploited first, then severity, then EPSS, with a `rankReason` on each finding, used by assess_project, plan_modernization and the report.
 2. **A fix that was verified** (runner result, not projection).
 3. **One call from the AI client**, one approval, ending in a branch pull request (merge stays manual).
 4. **A report to forward**: always PDF, SARIF and SBOM together (no format choice), each with a signed 10 minute download link and a widget with download buttons.

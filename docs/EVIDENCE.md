@@ -6,6 +6,7 @@ Written 2026-11-01 for the owner and for judges. Labels: LIVE (run for real agai
 | Capability | Label | Notes |
 |---|---|---|
 | assess_project, analyze_advisory (OSV, CISA KEV, EPSS, endoflife.date, php.net/Node feeds) | LIVE | Real public data. Rules and the 0-100 score formula are our own, not an industry standard. Built-in EOL tables are an offline fallback. |
+| check_watch (CISA KEV, EPSS, endoflife.date, php.net and Node release feeds) | LIVE | Run locally against the live feeds (Log4Shell KEV hit, PHP 8.1 EOL date). Not yet confirmed by the owner on the deployed server. |
 | plan_modernization, preview_changes | LIVE | Real diffs on real fetched repos. |
 | apply_stage | PROJECTED | Patch is real; the re-score uses a simulated lockfile refresh in our code on a temporary copy. Nothing in the user's repo changes. |
 | Runner (GitHub Actions workflow, prebuilt image, PHP selection) | LIVE | Dispatched by hand twice on GitHub against php-shop (no patch). Real tool output (trivy, semgrep, composer-audit, gitleaks, checkov, rector). |
