@@ -12,6 +12,16 @@ export interface KeyEntry {
 
 export const sha256 = (value: string): Buffer => createHash('sha256').update(value).digest();
 
+// Fixed id used when METAMORPH_AUTH=off (local development): there is no key to identify.
+export const ANON_KEY_ID = 'anon';
+
+// Short, non-secret identifier of a key entry: the first 12 hex characters of SHA-256 over a domain prefix and the
+// stored key hash. It is one-way (the stored hash is not recoverable from it, and the key is not recoverable from the
+// hash), so it is safe in signed download links and logs. Used to bind report downloads to the requesting key.
+export function keyIdOf(entry: Pick<KeyEntry, 'hash'>): string {
+  return createHash('sha256').update('metamorph-keyid.').update(entry.hash).digest('hex').slice(0, 12);
+}
+
 // Env format: METAMORPH_KEY_<LABEL>=<scope>:<sha256 hex of the key>
 // ponytail: keys live in host env vars; revoking means removing the variable and redeploying.
 export function parseKeyTable(env: Record<string, string | undefined>): KeyEntry[] {
@@ -35,7 +45,7 @@ export function extractKey(metadata: Record<string, unknown> | undefined): strin
 }
 
 export type AuthResult =
-  | { ok: true; label: string; scope: Scope }
+  | { ok: true; label: string; scope: Scope; keyId: string }
   | { ok: false; status: 401 | 403; message: string };
 
 export function authorize(key: string | undefined, required: Scope, table: KeyEntry[]): AuthResult {
@@ -52,5 +62,5 @@ export function authorize(key: string | undefined, required: Scope, table: KeyEn
   if (RANK[match.scope] < RANK[required]) {
     return { ok: false, status: 403, message: `This tool needs "${required}" scope but this key has "${match.scope}". Ask the owner for a key with "${required}" scope.` };
   }
-  return { ok: true, label: match.label, scope: match.scope };
+  return { ok: true, label: match.label, scope: match.scope, keyId: keyIdOf(match) };
 }

@@ -1,5 +1,5 @@
 // GET /reports/<id>.<ext>?t=<token>: serves a generated report from the in-memory cache.
-// Auth is the signed, expiring token (a browser click cannot send an API key). No directory listing: only this one route.
+// Auth is the signed, expiring token (a browser click cannot send an API key); its key id must match the cache entry's owner. No directory listing: only this one route.
 import { hasValidSecret, verifyDownloadToken } from '../../common/download-token.js';
 import { FORMATS, MIME, SUFFIX, reportCache, type ReportCache } from './report.js';
 
@@ -43,7 +43,13 @@ export function handleReportDownload(req: Req, res: Res, deps: DownloadDeps = {}
   if (!v.ok) {
     return text(res, 403, v.reason === 'expired' ? 'This download link has expired. Run generate_report again to get new links.' : 'Invalid download link.');
   }
-  const artifact = (deps.cache ?? reportCache).get(id, format);
+  const cache = deps.cache ?? reportCache;
+  const owner = cache.ownerOf(id);
+  if (owner === undefined) return text(res, 404, EXPIRED);
+  // The link was issued for one key; the entry records which key created it. Disagreement is refused with the same
+  // message as a bad signature, so a caller learns nothing about whose report it is.
+  if (owner !== v.kid) return text(res, 403, 'Invalid download link.');
+  const artifact = cache.get(id, format);
   if (!artifact) return text(res, 404, EXPIRED);
   res.status(200);
   res.setHeader('Content-Type', MIME[format]);

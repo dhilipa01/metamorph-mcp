@@ -34,16 +34,17 @@ export interface Artifact {
 }
 
 export class ReportCache {
-  private entries = new Map<string, { at: number; artifacts: Map<ReportFormat, Artifact> }>();
+  private entries = new Map<string, { at: number; owner: string; artifacts: Map<ReportFormat, Artifact> }>();
   constructor(
     private readonly now: () => number = Date.now,
     private readonly max = CACHE_MAX_ENTRIES,
     private readonly ttlMs = CACHE_TTL_MS
   ) {}
 
-  put(id: string, artifacts: Artifact[]): void {
+  // owner: short key id of the API key that requested the report ('anon' when auth is off)
+  put(id: string, artifacts: Artifact[], owner: string = 'anon'): void {
     this.entries.delete(id); // re-insert moves it to the newest position
-    this.entries.set(id, { at: this.now(), artifacts: new Map(artifacts.map((a) => [a.format, a])) });
+    this.entries.set(id, { at: this.now(), owner, artifacts: new Map(artifacts.map((a) => [a.format, a])) });
     this.sweep();
     while (this.entries.size > this.max) this.entries.delete(this.entries.keys().next().value as string);
   }
@@ -55,6 +56,11 @@ export class ReportCache {
     this.entries.delete(id); // LRU: reading refreshes recency, not the TTL
     this.entries.set(id, e);
     return e.artifacts.get(format);
+  }
+
+  ownerOf(id: string): string | undefined {
+    this.sweep();
+    return this.entries.get(id)?.owner;
   }
 
   get size(): number {
@@ -116,7 +122,7 @@ export interface LinkProvider {
 const LABEL: Record<ReportFormat, string> = { pdf: 'PDF report', sarif: 'SARIF 2.1.0 findings', sbom: 'CycloneDX 1.5 SBOM' };
 
 // Always renders all three formats; there is no format option.
-export async function generateReport(data: ReportData, links?: LinkProvider, cache: ReportCache = reportCache): Promise<ReportSummary> {
+export async function generateReport(data: ReportData, links?: LinkProvider, cache: ReportCache = reportCache, ownerKeyId: string = 'anon'): Promise<ReportSummary> {
   const artifacts: Artifact[] = [];
   let pages = 0;
   for (const format of FORMATS) {
@@ -129,10 +135,11 @@ export async function generateReport(data: ReportData, links?: LinkProvider, cac
       artifacts.push({ format, mimeType: MIME[format], data: Buffer.from(text, 'utf8') });
     }
   }
-  const h = createHash('sha256');
+  // The owner is part of the id: two keys that produce identical files get different ids, so one can never overwrite the other's entry.
+  const h = createHash('sha256').update(`owner:${ownerKeyId}\n`);
   for (const a of artifacts) h.update(a.format).update(a.data);
   const reportId = h.digest('hex').slice(0, 24);
-  cache.put(reportId, artifacts);
+  cache.put(reportId, artifacts, ownerKeyId);
 
   const counts = Object.fromEntries(data.counts.map((c) => [c.severity, c.count.value])) as Record<string, number>;
   let absolute = true;

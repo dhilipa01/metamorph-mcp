@@ -21,6 +21,7 @@ export interface LinkEnv {
   secret?: string;
   publicUrl?: string;
   routesActive: boolean;
+  keyId: string; // short non-secret id of the requesting key ('anon' when auth is off); goes into the signed claim
   now?: number; // epoch seconds, for tests
 }
 
@@ -36,7 +37,7 @@ export function linkProvider(env: LinkEnv): LinkProvider {
   return {
     hint: base ? '' : NO_PUBLIC,
     link(id, ext) {
-      const path = `${REPORT_ROUTE}/${id}.${ext}?t=${signDownloadToken({ id, ext }, secret, env.now)}`;
+      const path = `${REPORT_ROUTE}/${id}.${ext}?t=${signDownloadToken({ id, ext, kid: env.keyId }, secret, env.now)}`;
       return { path, url: base ? `${base}${path}` : undefined };
     }
   };
