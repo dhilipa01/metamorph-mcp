@@ -16,6 +16,7 @@ export interface Finding {
   kev?: boolean; // listed in CISA Known Exploited Vulnerabilities (only ever set to true)
   epss?: number; // EPSS probability 0..1
   source?: string; // where the enrichment came from, e.g. "osv.dev"
+  rankReason?: string; // why it sits where it does in the ranking (rank.ts), max 80 chars; set by assessFull
 }
 
 export interface DepRef {

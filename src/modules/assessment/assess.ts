@@ -9,14 +9,32 @@ import { readKeyFiles } from './files.js';
 import { detectHosting } from './hosting.js';
 import { inventoryNode, nodeFindings, NODE_EOL } from './node-inventory.js';
 import { inventoryPhp, phpFindings, PHP_EOL, scanPhpSources } from './php-inventory.js';
+import { rankFindings } from './rank.js';
 import { scoreFindings, topFindings, type Score } from './score.js';
 import type { DependencyFix, DepRef, Finding, Severity } from './types.js';
 
 export type Analyzer = (packages: PackageRef[]) => Promise<PackageAnalysis[]>;
 // EPSS lookup by CVE id (probability 0..1). Optional enrichment: a failure adds nothing.
 export type EpssLookup = (cves: string[]) => Promise<Map<string, number>>;
-// Live end-of-life check for a release cycle. Returns the EOL date when that cycle is already past its end of support.
-export type EolLookup = (product: 'php' | 'nodejs', cycle: string) => Promise<{ eolDate: string; latest: string } | undefined>;
+// Live end-of-life check for a release cycle. Answers:
+//   { eolDate, latest }  the cycle is past its end of support
+//   { supported: true }  endoflife.date answered and the cycle is still supported
+//   undefined            no answer (feed down, unknown cycle, or a stub): nothing is claimed about the feed
+// fetchedAt / url describe the real answer when the lookup knows them (they are copied to the report's source list).
+export type EolAnswer = { eolDate: string; latest: string; fetchedAt?: string; url?: string } | { supported: true; fetchedAt?: string; url?: string };
+export type EolLookup = (product: 'php' | 'nodejs', cycle: string) => Promise<EolAnswer | undefined>;
+
+// An outside or built-in source the assessment relied on. `builtIn` sources were never fetched, so they have no time.
+export interface AssessmentSource {
+  name: string;
+  url?: string;
+  fetchedAt?: string;
+  builtIn?: boolean;
+}
+
+export const EOL_LIVE_SOURCE = 'endoflife.date';
+export const PHP_EOL_TABLE_SOURCE: AssessmentSource = { name: 'PHP end-of-life table (built-in, offline fallback)', url: 'https://www.php.net/supported-versions.php', builtIn: true };
+export const NODE_EOL_TABLE_SOURCE: AssessmentSource = { name: 'Node.js end-of-life table (built-in, offline fallback)', url: 'https://github.com/nodejs/Release/blob/main/schedule.json', builtIn: true };
 
 export interface AssessOptions {
   analyze?: Analyzer;
@@ -34,7 +52,8 @@ export function liveEpss(client: EpssClient = new EpssClient()): EpssLookup {
 export function liveEol(client: EolClient = new EolClient()): EolLookup {
   return async (product, cycle) => {
     const c = await client.tryCheck(product, cycle);
-    return c && c.isEol && typeof c.eol === 'string' ? { eolDate: c.eol, latest: c.latest } : undefined;
+    if (!c) return undefined;
+    return c.isEol && typeof c.eol === 'string' ? { eolDate: c.eol, latest: c.latest, fetchedAt: c.fetchedAt, url: c.source } : { supported: true, fetchedAt: c.fetchedAt, url: c.source };
   };
 }
 
@@ -61,11 +80,11 @@ export interface FullAssessment {
   findings: Finding[];
   fixes: DependencyFix[];
   files: Record<string, string>;
+  sources?: AssessmentSource[]; // outside or built-in sources the runtime end-of-life check relied on (report appendix)
 }
 
 const MAX_CHECKED = 50;
 const OSV_TO_FINDING: Record<OsvSeverity, Severity> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', unknown: 'medium' };
-const RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
 function dockerNodeMajor(dockerfile: string | undefined): number | undefined {
   const m = dockerfile ? /^\s*FROM\s+node:(\d+)/im.exec(dockerfile) : null;
@@ -115,22 +134,30 @@ function withStandards(f: Finding): Finding {
   return { ...f, cwe: c.cwe, ...(c.owasp.length > 0 ? { owasp: c.owasp } : {}) };
 }
 
-async function extraEolFindings(nodeMajor: number | undefined, phpMinor: string | undefined, lookup: EolLookup | undefined): Promise<Finding[]> {
-  if (!lookup) return [];
+// Which EOL source decided the runtime verdict: the built-in tables when they know the version, otherwise endoflife.date
+// when it answered. A source is listed only if it was really used; a live source carries the time it was really fetched.
+async function extraEolFindings(nodeMajor: number | undefined, phpMinor: string | undefined, lookup: EolLookup | undefined): Promise<{ findings: Finding[]; sources: AssessmentSource[] }> {
   const out: Finding[] = [];
+  const sources: AssessmentSource[] = [];
+  if (nodeMajor !== undefined && NODE_EOL[nodeMajor] !== undefined) sources.push(NODE_EOL_TABLE_SOURCE);
+  if (phpMinor !== undefined && PHP_EOL[phpMinor] !== undefined) sources.push(PHP_EOL_TABLE_SOURCE);
+  if (!lookup) return { findings: out, sources };
+  const live = (r: EolAnswer, product: string): AssessmentSource => ({ name: EOL_LIVE_SOURCE, url: r.url ?? `https://endoflife.date/api/${product}.json`, ...(r.fetchedAt ? { fetchedAt: r.fetchedAt } : {}) });
   try {
     if (nodeMajor !== undefined && NODE_EOL[nodeMajor] === undefined) {
       const r = await lookup('nodejs', String(nodeMajor));
-      if (r) out.push({ id: 'node-runtime-eol', category: 'runtime', severity: 'high', title: `Node.js ${nodeMajor} is past end of life`, evidence: `Node ${nodeMajor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Move to the current maintained LTS (Node 22 or 24).', source: 'endoflife.date' });
+      if (r) sources.push(live(r, 'nodejs'));
+      if (r && 'eolDate' in r) out.push({ id: 'node-runtime-eol', category: 'runtime', severity: 'high', title: `Node.js ${nodeMajor} is past end of life`, evidence: `Node ${nodeMajor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Move to the current maintained LTS (Node 22 or 24).', source: 'endoflife.date' });
     }
     if (phpMinor !== undefined && PHP_EOL[phpMinor] === undefined) {
       const r = await lookup('php', phpMinor);
-      if (r) out.push({ id: 'php-version-eol', category: 'runtime', severity: 'high', title: `PHP ${phpMinor} no longer receives security fixes`, evidence: `PHP ${phpMinor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Raise the PHP requirement to a version that still receives security support.', source: 'endoflife.date' });
+      if (r) sources.push(live(r, 'php'));
+      if (r && 'eolDate' in r) out.push({ id: 'php-version-eol', category: 'runtime', severity: 'high', title: `PHP ${phpMinor} no longer receives security fixes`, evidence: `PHP ${phpMinor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Raise the PHP requirement to a version that still receives security support.', source: 'endoflife.date' });
     }
   } catch {
     // feed trouble never fails an assessment
   }
-  return out;
+  return { findings: out, sources };
 }
 
 // One finding per rule: repeats collapse into "<first evidence> (+N more)" so the list stays readable and the score
@@ -199,7 +226,8 @@ export async function assessFull(dir: string, opts: AssessOptions = {}): Promise
   if (phpInv) findings.push(...phpFindings(phpInv, today), ...scanPhpSources(kf.php));
 
   // Extra EOL signal: only for versions the checked-in tables do not know (they stay the offline source of truth).
-  findings.push(...(await extraEolFindings(nodeInv?.minNodeMajor, phpInv?.minPhp, eolLookup)));
+  const eol = await extraEolFindings(nodeInv?.minNodeMajor, phpInv?.minPhp, eolLookup);
+  findings.push(...eol.findings);
 
   const todayIso = today.toISOString().slice(0, 10);
   const hosting = detectHosting(kf.paths, c, { isNodeMajorEol: (major) => (NODE_EOL[major] ?? '9999') < todayIso });
@@ -239,7 +267,7 @@ export async function assessFull(dir: string, opts: AssessOptions = {}): Promise
   }
   findings.push(...dependencyFindings(analyses, approx, epss));
 
-  const sorted = groupByRule(findings.map(withStandards)).sort((a, b) => RANK[b.severity] - RANK[a.severity] || a.id.localeCompare(b.id));
+  const sorted = rankFindings(groupByRule(findings.map(withStandards)))
   const stack = nodeInv && phpInv ? 'mixed' : nodeInv ? 'node' : phpInv ? 'php' : 'unknown';
   const vulnerable = analyses.filter((a) => a.affected).length;
   const urgent = analyses.filter((a) => a.findings.some((f) => f.urgent)).length;
@@ -263,5 +291,5 @@ export async function assessFull(dir: string, opts: AssessOptions = {}): Promise
     findingCount: sorted.length,
     truncated: kf.truncated
   };
-  return { assessment, findings: sorted, fixes: dependencyFixes(analyses, devByKey), files: c };
+  return { assessment, findings: sorted, fixes: dependencyFixes(analyses, devByKey), files: c, sources: eol.sources };
 }

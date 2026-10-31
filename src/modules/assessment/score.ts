@@ -1,5 +1,5 @@
 import type { Category, Finding, Severity } from './types.js';
-import { SEVERITY_RANK } from './types.js';
+import { compareFindings } from './rank.js';
 
 // Scoring: start at 100 and deduct a fixed weight per finding by severity
 // (critical 25, high 12, medium 5, low 2, info 0). The score never drops below 0 and is rounded.
@@ -36,12 +36,6 @@ export function topFindings(findings: Finding[], max = 10): Finding[] {
     seen.add(key);
     unique.push(f);
   }
-  unique.sort(
-    (a, b) =>
-      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
-      a.category.localeCompare(b.category) ||
-      a.id.localeCompare(b.id) ||
-      (a.evidence ?? '').localeCompare(b.evidence ?? '')
-  );
+  unique.sort(compareFindings);
   return unique.slice(0, Math.max(0, max));
 }

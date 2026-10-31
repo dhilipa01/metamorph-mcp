@@ -113,6 +113,31 @@ describe.runIf(!POPPLER)('PDF layout checks', () => {
 });
 
 describe('PDF content rules', () => {
+  it.skipIf(!POPPLER)('cover page shows score, severity strip, the top 3 ranked findings and the what-it-is note, and nothing spills to page 2', async () => {
+    const data = dataOf(manyFindings(40), { repoUrl: 'https://github.com/owner/repo' });
+    data.meta.commit = '0123456789abcdef0123456789abcdef01234567';
+    data.meta.subfolder = 'apps/shop';
+    const r = await renderPdf(data);
+    const dir = await tmp();
+    const f = join(dir, 'c.pdf');
+    await writeFile(f, r.buffer);
+    const page = (n: number) => spawnSync('pdftotext', ['-f', String(n), '-l', String(n), f, '-'], { encoding: 'utf8' }).stdout.replace(/\s+/g, ' ');
+    const one = page(1);
+    expect(one).toContain('Modernization assessment report');
+    expect(one).toContain('0123456789abcdef0123456789abcdef01234567'); // full sha, no break inserted
+    expect(one).toContain('apps/shop');
+    expect(one).toContain(`${data.score.value} / 100`);
+    expect(one).toContain('Origin: measured');
+    for (const label of ['Critical', 'High', 'Medium', 'Low', 'Info']) expect(one).toContain(label);
+    expect(one).toContain('A score of 100 means nothing our checks detect; projected numbers are estimates; only runner results are measured.');
+    for (const top of data.findings.slice(0, 3)) {
+      expect(one).toContain(top.rankReason);
+    }
+    expect(one).toContain(data.findings[0].title.slice(0, 20));
+    expect(one).not.toContain('Executive summary'); // that starts on page 2
+    expect(page(2)).toContain('Executive summary');
+  }, 30_000);
+
   it('says exactly that nothing was verified when no runner result is attached', async () => {
     const r = await renderPdf(dataOf(manyFindings(3)));
     expect(r.buffer.length).toBeGreaterThan(1000);

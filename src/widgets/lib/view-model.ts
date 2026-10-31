@@ -19,6 +19,7 @@ export interface FindingVM {
   title: string;
   evidence?: string;
   recommendation?: string;
+  rankReason?: string;
 }
 
 export interface StageVM {
@@ -133,7 +134,8 @@ function finding(raw: unknown): FindingVM | undefined {
     category: str(raw.category) ?? 'general',
     title,
     evidence: str(raw.evidence),
-    recommendation: str(raw.recommendation)
+    recommendation: str(raw.recommendation),
+    rankReason: str(raw.rankReason)
   };
 }
 

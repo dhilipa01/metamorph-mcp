@@ -31,6 +31,8 @@ interface PdfMake {
   createPdf(doc: DocDefinition, options?: Record<string, unknown>): PdfOutput;
 }
 
+const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
+
 const TABLE_LAYOUT = {
   metamorph: {
     hLineWidth: (i: number, node: { table: { body: unknown[] } }) => (i === 0 || i === 1 || i === node.table.body.length ? 0.8 : 0.4),
@@ -41,6 +43,18 @@ const TABLE_LAYOUT = {
     paddingRight: () => 3,
     paddingTop: () => 2,
     paddingBottom: () => 2
+  },
+  // severity strip on the cover: one tinted column per severity (the words and numbers carry the meaning)
+  strip: {
+    hLineWidth: () => 0.6,
+    vLineWidth: () => 0.6,
+    hLineColor: () => COLORS.muted,
+    vLineColor: () => COLORS.muted,
+    fillColor: (_row: number, node: { table: { body: Array<unknown[]> } }, col: number) => SEVERITY_TINT[SEVERITY_ORDER[col]] ?? null,
+    paddingLeft: () => 6,
+    paddingRight: () => 6,
+    paddingTop: () => 3,
+    paddingBottom: () => 3
   }
 };
 
@@ -145,7 +159,7 @@ const h1 = (text: string, pageBreak = false): Node => ({ text: run(text, tags.do
 const h2 = (text: string): Node => ({ text: run(text, tags.document.child('H2')), style: 'h2', headlineLevel: 2 });
 const para = (text: string, extra: Node = {}): Node => ({ text: run(safeText(text, 600, 40), tags.document.child('P')), style: 'body', ...extra });
 const th = (text: string): Node => ({ text, style: 'th' });
-const td = (text: unknown, extra: Node = {}): Node => ({ text: safeText(text), style: 'td', ...extra });
+const td = (text: unknown, extra: Node = {}, chunk = 14): Node => ({ text: safeText(text, MAX_FIELD_CHARS, chunk), style: 'td', ...extra });
 
 interface TableOpts {
   widths: Array<number | string>;
@@ -210,7 +224,8 @@ function findingRow(f: ReportFinding): Node[] {
     {
       stack: [
         { text: safeText(f.title), style: 'td' },
-        { text: safeText(`Fix: ${f.recommendation}`), style: 'tdMuted' }
+        { text: safeText(`Fix: ${f.recommendation}`), style: 'tdMuted' },
+        { text: safeText(`Ranked: ${f.rankReason}`), style: 'tdMuted' }
       ]
     },
     td(f.cwe.join(', ') || '-'),
@@ -221,30 +236,86 @@ function findingRow(f: ReportFinding): Node[] {
   ];
 }
 
+const SEVERITY_TINT: Record<string, string> = { critical: '#f6d5d8', high: '#fbe0c9', medium: '#fff1bf', low: '#dcecd6', info: '#e1e6ec' };
+const SEVERITY_LABEL: Record<string, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
+const CONTENT_WIDTH = 595.28 - 2 * PAGE_MARGIN;
+export const COVER_NOTE = 'A score of 100 means nothing our checks detect; projected numbers are estimates; only runner results are measured.';
+
+// A text paragraph with its own style, tagged as P.
+const styled = (text: string, style: string, extra: Node = {}): Node => ({ text: run(text, tags.document.child('P')), style, ...extra });
+
+// Cover page: everything a reader needs first. Text is real content (H1/H2/P/Table); the score bar and rules are
+// decorative shapes (artifacts) and every colour is backed by a word or a number.
 function cover(d: ReportData): Node[] {
-  const lines: Node[] = [
-    { text: run('Modernization assessment report', tags.document.child('H1')), style: 'title', margin: [0, 120, 0, 8] },
-    { text: run(safeText(d.meta.repoUrl, MAX_FIELD_CHARS, 40), tags.document.child('P')), style: 'subtitle' },
-    { text: run(`Overall score: ${d.score.value} / 100`, tags.document.child('P')), style: 'score', margin: [0, 40, 0, 2] },
-    para(`Origin: ${d.score.origin} (${ORIGIN_NOTE[d.score.origin]}). Higher is healthier.`),
+  const top = d.findings.slice(0, 3);
+  const pct = Math.max(0, Math.min(100, d.score.value));
+  const out: Node[] = [
+    { text: run('Modernization assessment report', tags.document.child('H1')), style: 'title', margin: [0, 28, 0, 6] },
+    styled(safeText(d.meta.repoUrl, MAX_FIELD_CHARS, 40), 'subtitle'),
+    { canvas: [{ type: 'rect', x: 0, y: 0, w: CONTENT_WIDTH, h: 3, color: COLORS.accent }], margin: [0, 10, 0, 22] },
+
     tagTable({
       style: 'tableBlock',
-      margin: [0, 30, 0, 0],
+      margin: [0, 0, 0, 10],
       table: {
-        widths: [110, '*'],
+        widths: [100, '*'],
         body: [
-          [th('Repository'), td(d.meta.repoUrl)],
-          [th('Folder'), td(d.meta.subfolder ?? '(repository root)')],
-          [th('Commit / ref'), td(d.meta.commit ?? 'not recorded (default branch at scan time)')],
+          [th('Repository'), td(d.meta.repoUrl, {}, 40)],
+          [th('Folder'), td(d.meta.subfolder ?? '(repository root)', {}, 40)],
+          [th('Commit / ref'), td(d.meta.commit ?? 'not recorded (default branch at scan time)', {}, 48)],
           [th('Generated'), td(d.meta.generatedAt)],
           [th('Detected stack'), td(d.stack)],
           [th('Declared runtime'), td(d.runtime)]
         ]
       },
       layout: 'metamorph'
-    })
+    }),
+
+    styled('Overall score', 'coverLabel', { margin: [0, 26, 0, 0] }),
+    { text: run(`${d.score.value} / 100`, tags.document.child('P')), style: 'score', margin: [0, 0, 0, 4] },
+    // bar: decorative track and fill; the number above carries the meaning
+    {
+      canvas: [
+        { type: 'rect', x: 0, y: 0, w: CONTENT_WIDTH, h: 12, color: '#dde2e8' },
+        { type: 'rect', x: 0, y: 0, w: (CONTENT_WIDTH * pct) / 100, h: 12, color: COLORS.accent },
+        { type: 'rect', x: 0, y: 0, w: CONTENT_WIDTH, h: 12, lineWidth: 0.8, lineColor: COLORS.muted }
+      ],
+      margin: [0, 0, 0, 4]
+    },
+    styled(`Origin: ${d.score.origin} (${ORIGIN_NOTE[d.score.origin]}). Higher is healthier.`, 'body', { margin: [0, 0, 0, 22] }),
+
+    styled('Findings by severity', 'coverLabel', { margin: [0, 0, 0, 4] }),
+    tagTable({
+      style: 'tableBlock',
+      margin: [0, 0, 0, 22],
+      table: {
+        headerRows: 1,
+        widths: d.counts.map(() => '*'),
+        body: [d.counts.map((c) => th(SEVERITY_LABEL[c.severity])), d.counts.map((c) => td(c.count.value, { bold: true, fontSize: 18 }))]
+      },
+      layout: 'strip'
+    }),
+
+    h2('Top findings'),
+    ...(top.length === 0
+      ? [para('No findings.')]
+      : [
+          table({
+            widths: [16, 46, '*'],
+            header: ['#', 'Severity', 'Finding and why it ranks here'],
+            rows: top.map((f, i) => [
+              td(i + 1),
+              td(f.severity, { bold: true }),
+              { stack: [{ text: safeText(f.title, 110, 40), style: 'td' }, { text: safeText(f.rankReason, 80, 40), style: 'tdMuted' }] }
+            ])
+          })
+        ]),
+
+    { ...h2('What this report is, and is not'), margin: [0, 22, 0, 4] },
+    para(COVER_NOTE, { bold: true, fontSize: 11 }),
+    para('It is a static assessment of the repository files plus public advisory feeds. It does not run your code, and a patch is only a preview until your own tests pass.', { fontSize: 11, margin: [0, 0, 0, 0] })
   ];
-  return lines;
+  return out;
 }
 
 function executiveSummary(d: ReportData): Node[] {
@@ -478,7 +549,8 @@ export function buildDocDefinition(d: ReportData, caps: Caps = DEFAULT_CAPS, max
     styles: {
       title: { fontSize: 26, bold: true, color: COLORS.accent },
       subtitle: { fontSize: 12, color: COLORS.muted },
-      score: { fontSize: 30, bold: true, color: COLORS.accent },
+      score: { fontSize: 34, bold: true, color: COLORS.accent },
+      coverLabel: { fontSize: 9, bold: true, color: COLORS.muted },
       h1: { fontSize: 16, bold: true, color: COLORS.accent, margin: [0, 0, 0, 8] },
       h2: { fontSize: 12, bold: true, margin: [0, 10, 0, 4] },
       body: { fontSize: 10, margin: [0, 0, 0, 6] },
