@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { Origin, ReportData, ReportFinding } from './report-data.js';
 import { NOT_RECORDED, cleanText } from './report-data.js';
+import { TagNode, TagTree, installPdfTagging } from './pdf-tags.js';
 
 export const MAX_PAGES = 30;
 export const MAX_PDF_BYTES = 3 * 1024 * 1024;
@@ -60,6 +61,7 @@ function getEngine(): PdfMake {
     }
   });
   pm.setTableLayouts(TABLE_LAYOUT);
+  installPdfTagging();
   pm.setUrlAccessPolicy(() => false); // no network, ever
   pm.setLocalAccessPolicy((p) => path.resolve(p).startsWith(dir + path.sep)); // only the bundled font folder
   engine = pm;
@@ -134,9 +136,14 @@ function label(v: { value: number; origin: Origin }, suffix = ''): string {
   return `${v.value}${suffix} (${v.origin})`;
 }
 
-const h1 = (text: string, pageBreak = false): Node => ({ text, style: 'h1', headlineLevel: 1, ...(pageBreak ? { pageBreak: 'before' } : {}) });
-const h2 = (text: string): Node => ({ text, style: 'h2', headlineLevel: 2 });
-const para = (text: string, extra: Node = {}): Node => ({ text: safeText(text, 600, 40), style: 'body', ...extra });
+// Structure (PDF/UA): the builders below run synchronously inside buildDocDefinition, which owns `tags`. The text of
+// every node is wrapped as [{ text, _tag }] where _tag is the structure element it belongs to: pdfmake copies the
+// properties of a text run (not of a bare string) onto the lines it lays out. table() and tagTable() tag the cells.
+let tags = new TagTree();
+const run = (text: string, tag: TagNode): Node[] => [{ text, _tag: tag }];
+const h1 = (text: string, pageBreak = false): Node => ({ text: run(text, tags.document.child('H1')), style: 'h1', headlineLevel: 1, ...(pageBreak ? { pageBreak: 'before' } : {}) });
+const h2 = (text: string): Node => ({ text: run(text, tags.document.child('H2')), style: 'h2', headlineLevel: 2 });
+const para = (text: string, extra: Node = {}): Node => ({ text: run(safeText(text, 600, 40), tags.document.child('P')), style: 'body', ...extra });
 const th = (text: string): Node => ({ text, style: 'th' });
 const td = (text: unknown, extra: Node = {}): Node => ({ text: safeText(text), style: 'td', ...extra });
 
@@ -146,8 +153,29 @@ interface TableOpts {
   rows: Node[][];
 }
 
+// Adds Table > TR > TH/TD > P to the structure tree for a pdfmake table node. A cell built with th() is a header cell
+// (scope Column in a repeated header row, Row anywhere else); every text node inside a cell becomes a P.
+function tagTable(node: Node): Node {
+  const t = node.table as { headerRows?: number; body: Node[][] };
+  const tableTag = tags.document.child('Table');
+  t.body.forEach((row, r) => {
+    const rowTag = tableTag.child('TR');
+    for (const cell of row) {
+      const header = cell.style === 'th';
+      const cellTag = rowTag.child(header ? 'TH' : 'TD', header ? (r < (t.headerRows ?? 0) ? 'Column' : 'Row') : undefined);
+      tagCell(cell, cellTag);
+    }
+  });
+  return node;
+}
+
+function tagCell(n: Node, cell: TagNode): void {
+  if (Array.isArray(n.stack)) for (const s of n.stack as Node[]) tagCell(s, cell);
+  else if (typeof n.text === 'string') n.text = run(n.text, cell.child('P'));
+}
+
 function table(o: TableOpts): Node {
-  return {
+  return tagTable({
     style: 'tableBlock',
     table: {
       headerRows: 1,
@@ -157,11 +185,11 @@ function table(o: TableOpts): Node {
       body: [o.header.map(th), ...o.rows]
     },
     layout: 'metamorph'
-  };
+  });
 }
 
 function note(text: string): Node {
-  return { text: safeText(text, 600, 40), style: 'note' };
+  return { text: run(safeText(text, 600, 40), tags.document.child('P')), style: 'note' };
 }
 
 // ---- sections ----
@@ -195,11 +223,11 @@ function findingRow(f: ReportFinding): Node[] {
 
 function cover(d: ReportData): Node[] {
   const lines: Node[] = [
-    { text: 'Modernization assessment report', style: 'title', margin: [0, 120, 0, 8] },
-    { text: safeText(d.meta.repoUrl, MAX_FIELD_CHARS, 40), style: 'subtitle' },
-    { text: `Overall score: ${d.score.value} / 100`, style: 'score', margin: [0, 40, 0, 2] },
-    { text: `Origin: ${d.score.origin} (${ORIGIN_NOTE[d.score.origin]}). Higher is healthier.`, style: 'body' },
-    {
+    { text: run('Modernization assessment report', tags.document.child('H1')), style: 'title', margin: [0, 120, 0, 8] },
+    { text: run(safeText(d.meta.repoUrl, MAX_FIELD_CHARS, 40), tags.document.child('P')), style: 'subtitle' },
+    { text: run(`Overall score: ${d.score.value} / 100`, tags.document.child('P')), style: 'score', margin: [0, 40, 0, 2] },
+    para(`Origin: ${d.score.origin} (${ORIGIN_NOTE[d.score.origin]}). Higher is healthier.`),
+    tagTable({
       style: 'tableBlock',
       margin: [0, 30, 0, 0],
       table: {
@@ -214,7 +242,7 @@ function cover(d: ReportData): Node[] {
         ]
       },
       layout: 'metamorph'
-    }
+    })
   ];
   return lines;
 }
@@ -426,11 +454,14 @@ function appendix(d: ReportData, caps: Caps): Node[] {
 // ---- document ----
 
 export function buildDocDefinition(d: ReportData, caps: Caps = DEFAULT_CAPS, maxPages: number = MAX_PAGES): DocDefinition {
+  tags = new TagTree();
   const repoShort = safeText(d.meta.repoUrl, 60, 30);
   return {
     pageSize: 'A4',
     pageMargins: [PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN],
     language: 'en-US',
+    version: '1.7', // pdfkit writes the XMP metadata stream (required by PDF/UA) only above PDF 1.3
+    subset: 'PDF/UA',
     tagged: true,
     displayTitle: true,
     compress: true,
