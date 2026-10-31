@@ -28,7 +28,7 @@ function samples() {
     'unicode and RTL': FIXTURES['unicode, RTL and emoji'](),
     'control characters': FIXTURES['control characters'](),
     '500-char strings': FIXTURES['500-char unbroken strings'](),
-    'many dependencies': FIXTURES['1 giant dependency table'](),
+    'many dependencies (300, scoped and vendor names)': dataOf(manyFindings(5), { deps: Array.from({ length: 300 }, (_, i) => ({ ecosystem: i % 2 ? ('npm' as const) : ('composer' as const), name: i % 2 ? `@scope/package-${i}` : `vendor/package-${i}`, version: `1.${i}.0`, dev: i % 3 === 0, approximate: i % 5 === 0 })) }),
     'manifest text, subfolder and commit sha': withFiles,
     'dependency without version': dataOf([], { deps: [{ ecosystem: 'npm', name: 'left-pad', version: '', dev: false, approximate: true }, { ecosystem: 'composer', name: 'Vendor/Pkg', version: '1.0.0', dev: true, approximate: false }] })
   };
