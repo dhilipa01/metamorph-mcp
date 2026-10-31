@@ -6,11 +6,14 @@ import type { Goal } from '../assessment/types.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
 import { buildPlan } from '../planning/plan.js';
 import { MIME, generateReport, lookupResource, type ReportFormat } from './report.js';
-import { buildReportData, type ReportData } from './report-data.js';
+import { attachRunnerResult, buildReportData, type ReportData } from './report-data.js';
 import { recordFeeds } from './feed-sources.js';
+import { GithubRunner, loadRunnerConfig } from '../verify/github-runner.js';
+import { fetchRunnerSummary } from '../verify/verify.js';
 import { projectAutomatedStages } from '../planning/apply.js';
 
 const GOALS = ['patch_advisory', 'upgrade_runtime', 'modernize_all'] as const;
+const RUN_ID = z.string().max(40).regex(/^[0-9]{1,20}$/, 'digits only');
 
 function refOf(repoUrl: string): string | undefined {
   try {
@@ -29,7 +32,11 @@ export class ReportTools {
       repo_url: z.string().min(10).max(300).describe('Public GitHub repository URL, e.g. https://github.com/owner/repo (a /tree/<branch> link works)'),
       subfolder: z.string().max(200).optional().describe('Optional folder inside the repository, e.g. apps/api'),
       formats: z.array(z.enum(['pdf', 'sarif', 'sbom'])).min(1).max(3).optional().describe('Formats to produce; default ["pdf"]'),
-      goal: z.enum(GOALS).optional().describe('Plan goal used for the plan section: patch_advisory, upgrade_runtime or modernize_all (default)')
+      goal: z.enum(GOALS).optional().describe('Plan goal used for the plan section: patch_advisory, upgrade_runtime or modernize_all (default)'),
+      runner_run_ids: z
+        .object({ baseline: RUN_ID.optional(), patched: RUN_ID.optional() })
+        .optional()
+        .describe('Run ids from verify_patch (finished runs). When given, the Verification section and measured before/after come from the runner. Without them the section says "Not verified".')
     }),
     examples: {
       request: { repo_url: 'https://github.com/owner/legacy-app', formats: ['pdf', 'sarif'] },
@@ -44,7 +51,7 @@ export class ReportTools {
     }
   })
   @UseGuards(scopeGuard('read'))
-  async generateReport(input: { repo_url: string; subfolder?: string; formats?: ReportFormat[]; goal?: Goal }, ctx: ExecutionContext) {
+  async generateReport(input: { repo_url: string; subfolder?: string; formats?: ReportFormat[]; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string } }, ctx: ExecutionContext) {
     ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all', formats: (input.formats ?? ['pdf']).join(',') });
     const data = await collectReportData(input, ctx);
     return generateReport(data, input.formats ?? ['pdf']);
@@ -55,11 +62,12 @@ export interface CollectDeps {
   archiveFetch?: typeof fetch;
   feeds?: Parameters<typeof recordFeeds>[0];
   now?: () => Date;
+  runner?: GithubRunner; // injectable for tests; defaults to the configured GitHub runner
 }
 
 // Everything generate_report needs from the network and the repository, as typed ReportData. Read-only.
 export async function collectReportData(
-  input: { repo_url: string; subfolder?: string; goal?: Goal },
+  input: { repo_url: string; subfolder?: string; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string } },
   ctx: Pick<ExecutionContext, 'logger'>,
   deps: CollectDeps = {}
 ): Promise<ReportData> {
@@ -80,7 +88,7 @@ export async function collectReportData(
     { fetchFn: deps.archiveFetch }
   );
   const ref = refOf(input.repo_url);
-  return buildReportData({
+  const data = buildReportData({
     full,
     plan,
     apply,
@@ -93,6 +101,10 @@ export async function collectReportData(
       generatedAt: (deps.now?.() ?? new Date()).toISOString()
     }
   });
+  const ids = input.runner_run_ids;
+  if (!ids || (!ids.baseline && !ids.patched)) return data;
+  const runner = deps.runner ?? new GithubRunner(loadRunnerConfig());
+  return attachRunnerResult(data, await fetchRunnerSummary(runner, ids));
 }
 
 // The SDK's resource handler matches {id} templates against the requested URI and returns Buffer as a binary blob.

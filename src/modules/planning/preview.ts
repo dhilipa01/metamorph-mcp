@@ -34,8 +34,8 @@ function action(p: FilePatch): 'create' | 'edit' | 'delete' {
   return p.before === undefined ? 'create' : 'edit';
 }
 
-const isEnvFile = (path: string) => (path.split('/').pop() ?? '').startsWith('.env');
-const isEnvTemplate = (path: string) => ENV_EXAMPLE.test(path);
+export const isEnvFile = (path: string) => (path.split('/').pop() ?? '').startsWith('.env');
+export const isEnvTemplate = (path: string) => ENV_EXAMPLE.test(path);
 
 // Env files show only a header (key-only templates excepted). The one exception is a template (.env.example) whose ADDED lines are all key-only
 // (KEY= with no value): its diff is what the user needs to apply the patch, and it can hold no secret value.

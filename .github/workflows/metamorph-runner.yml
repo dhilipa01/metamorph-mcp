@@ -1,5 +1,8 @@
 name: Metamorph runner
 
+# run-name carries the request_id so a dispatcher can find the run it started (the dispatch API may not return a run id).
+run-name: Metamorph runner ${{ inputs.request_id }}
+
 # Isolated verification of a repo (+ optional patch). Runs untrusted project code inside the runner container on an
 # ephemeral GitHub-hosted VM. No secrets are used anywhere in this workflow. See runner/README.md.
 on:
@@ -15,7 +18,17 @@ on:
         default: ''
         type: string
       patch_b64:
-        description: 'Optional base64 unified diff (workflow_dispatch inputs are capped at 65,535 characters in total)'
+        description: 'Optional base64 unified diff (prefer patch_gz_b64; workflow_dispatch inputs are capped at 65,535 characters in total)'
+        required: false
+        default: ''
+        type: string
+      patch_gz_b64:
+        description: 'Optional gzip-compressed then base64 unified diff (preferred; the cap applies to the compressed text)'
+        required: false
+        default: ''
+        type: string
+      request_id:
+        description: 'Caller-chosen id, shown in the run name (correlation)'
         required: false
         default: ''
         type: string
@@ -46,12 +59,13 @@ jobs:
           IN_REPO_URL: ${{ inputs.repo_url }}
           IN_SUBFOLDER: ${{ inputs.subfolder }}
           IN_PATCH_B64: ${{ inputs.patch_b64 }}
+          IN_PATCH_GZ_B64: ${{ inputs.patch_gz_b64 }}
           IN_CHECKS: ${{ inputs.checks }}
         run: |
           mkdir -p out && chmod 777 out
           docker run --rm \
             --cap-drop ALL --security-opt no-new-privileges --pids-limit 2048 \
-            -e REPO_URL="$IN_REPO_URL" -e SUBFOLDER="$IN_SUBFOLDER" -e PATCH_B64="$IN_PATCH_B64" -e CHECKS="$IN_CHECKS" \
+            -e REPO_URL="$IN_REPO_URL" -e SUBFOLDER="$IN_SUBFOLDER" -e PATCH_B64="$IN_PATCH_B64" -e PATCH_GZ_B64="$IN_PATCH_GZ_B64" -e CHECKS="$IN_CHECKS" \
             -v "$PWD/out:/out" \
             metamorph-runner
       - name: Upload result
