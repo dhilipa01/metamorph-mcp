@@ -9,7 +9,8 @@ import { buildPlan } from '../planning/plan.js';
 import { MIME, generateReport, lookupResource } from './report.js';
 import { reportRoutesActive } from './download.js';
 import { linkProvider } from './links.js';
-import { attachRunnerResult, buildReportData, type ReportData } from './report-data.js';
+import { attachCloud, attachRunnerResult, buildReportData, type ReportData } from './report-data.js';
+import { collectCloudSection, type CloudStepDeps } from '../cloud/report-cloud.js';
 import { recordFeeds } from './feed-sources.js';
 import { GithubRunner, loadRunnerConfig } from '../verify/github-runner.js';
 import { fetchRunnerSummary } from '../verify/verify.js';
@@ -31,7 +32,7 @@ export class ReportTools {
     name: 'generate_report',
     annotations: GENERATES_REPORT,
     description:
-      'Generate an assessment report for a public GitHub repository. Always produces three files: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. The result lists a signed download link for each file (valid 10 minutes, tied to the requesting API key but still usable by anyone who holds the link; absolute when the server has METAMORPH_PUBLIC_URL), the score, finding counts and page count; the files are also readable as metamorph://report/<id> resources for 10 minutes. Use when the user wants a report, PDF, SARIF or SBOM to keep or share; for a quick answer use assess_project. Read-only, needs a read key: nothing is changed.',
+      'Generate an assessment report for a public GitHub repository. Always produces three files: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. The result lists a signed download link for each file (valid 10 minutes, tied to the requesting API key but still usable by anyone who holds the link; absolute when the server has METAMORPH_PUBLIC_URL), the score, finding counts and page count; the files are also readable as metamorph://report/<id> resources for 10 minutes. Use when the user wants a report, PDF, SARIF or SBOM to keep or share; for a quick answer use assess_project. The AWS account is never contacted unless include_cloud is true; then a read-only Cloud inventory section (separate from the repository score) is added, or a short note when AWS is not set up. Read-only, needs a read key: nothing is changed.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe('Public GitHub repository URL, e.g. https://github.com/owner/repo (a /tree/<branch> link works)'),
       subfolder: z.string().max(200).optional().describe('Optional folder inside the repository, e.g. apps/api'),
@@ -39,7 +40,8 @@ export class ReportTools {
       runner_run_ids: z
         .object({ baseline: RUN_ID.optional(), patched: RUN_ID.optional() })
         .optional()
-        .describe('Run ids from verify_patch (finished runs). When given, the Verification section and measured before/after come from the runner. Without them the section says "Not verified".')
+        .describe('Run ids from verify_patch (finished runs). When given, the Verification section and measured before/after come from the runner. Without them the section says "Not verified".'),
+      include_cloud: z.boolean().optional().describe('Also scan the configured AWS account read-only and add a Cloud section; needs the AWS setup in docs/AWS_SETUP.md')
     }),
     examples: {
       request: { repo_url: 'https://github.com/owner/legacy-app' },
@@ -67,7 +69,7 @@ export class ReportTools {
   })
   @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
-  async generateReport(input: { repo_url: string; subfolder?: string; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string } }, ctx: ExecutionContext) {
+  async generateReport(input: { repo_url: string; subfolder?: string; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string }; include_cloud?: boolean }, ctx: ExecutionContext) {
     const keyId = requestKeyId(ctx); // short non-secret id of the requesting key; binds the download links to it
     ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all' });
     const data = await collectReportData(input, ctx);
@@ -81,15 +83,18 @@ export interface CollectDeps {
   feeds?: Parameters<typeof recordFeeds>[0];
   now?: () => Date;
   runner?: GithubRunner; // injectable for tests; defaults to the configured GitHub runner
+  cloud?: CloudStepDeps; // injectable for tests; only used when include_cloud is true
 }
 
 // Everything generate_report needs from the network and the repository, as typed ReportData. Read-only.
 export async function collectReportData(
-  input: { repo_url: string; subfolder?: string; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string } },
+  input: { repo_url: string; subfolder?: string; goal?: Goal; runner_run_ids?: { baseline?: string; patched?: string }; include_cloud?: boolean },
   ctx: Pick<ExecutionContext, 'logger'>,
   deps: CollectDeps = {}
 ): Promise<ReportData> {
   const goal = input.goal ?? 'modernize_all';
+  // AWS is reached only when the user asked (include_cloud). It starts now, runs beside the repository work and never rejects.
+  const cloud = input.include_cloud === true ? collectCloudSection(deps.cloud) : undefined;
   const feeds = recordFeeds(deps.feeds);
   const assess = { ...feeds.options };
   const { full, plan, apply, commit } = await withRepo(
@@ -120,9 +125,12 @@ export async function collectReportData(
     }
   });
   const ids = input.runner_run_ids;
-  if (!ids || (!ids.baseline && !ids.patched)) return data;
-  const runner = deps.runner ?? new GithubRunner(loadRunnerConfig());
-  return attachRunnerResult(data, await fetchRunnerSummary(runner, ids));
+  let out = data;
+  if (ids && (ids.baseline || ids.patched)) {
+    const runner = deps.runner ?? new GithubRunner(loadRunnerConfig());
+    out = attachRunnerResult(data, await fetchRunnerSummary(runner, ids, feeds.enrich));
+  }
+  return cloud ? attachCloud(out, await cloud) : out;
 }
 
 // The SDK's resource handler matches {id} templates against the requested URI and returns Buffer as a binary blob.

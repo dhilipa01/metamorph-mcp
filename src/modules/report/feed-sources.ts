@@ -6,6 +6,7 @@ import { EPSS_BASE, EpssClient } from '../feeds/epss.js';
 import { KEV_URL, KevClient } from '../feeds/kev.js';
 import { analyzePackages, type AdvisoryDeps } from '../intake/advisory.js';
 import type { AssessOptions, EolLookup, EpssLookup } from '../assessment/assess.js';
+import type { EnrichClients } from '../scanners/enrich.js';
 import type { FeedsData } from './report-data.js';
 
 export const UNAVAILABLE = 'unavailable';
@@ -14,6 +15,8 @@ const OSV_URL = 'https://api.osv.dev/v1';
 export interface FeedRecorder {
   options: Pick<AssessOptions, 'analyze' | 'epss' | 'eol'>;
   sources(): FeedsData['sources'];
+  /** The same KEV and EPSS clients (and their caches) for enriching runner findings, so each feed is fetched once per report. */
+  enrich: EnrichClients;
 }
 
 export function recordFeeds(deps: { fetchFn?: typeof fetch; now?: () => number; osv?: AdvisoryDeps } = {}): FeedRecorder {
@@ -82,6 +85,7 @@ export function recordFeeds(deps: { fetchFn?: typeof fetch; now?: () => number; 
       epss: epssLookup,
       eol: eolLookup
     },
-    sources: () => [...seen.values()]
+    sources: () => [...seen.values()],
+    enrich: { kev, epss, now }
   };
 }

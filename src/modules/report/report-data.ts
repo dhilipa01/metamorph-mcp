@@ -11,6 +11,7 @@ import { rankFindings, rankReason } from '../assessment/rank.js';
 import type { ApplyResult } from '../planning/apply.js';
 import { MEASURED_ORIGIN, SCORES_DIFFER_NOTE, type MeasuredAnalysis, type MeasuredSummary } from '../scanners/measured.js';
 import type { DedupeCounts } from '../scanners/dedupe.js';
+import type { EnrichmentInfo } from '../scanners/enrich.js';
 
 export type Origin = 'measured' | 'projected' | 'reported';
 
@@ -41,7 +42,8 @@ export interface RunnerSummary {
   php?: { selected?: string; version?: string; constraint?: string; constraintSource: string; reason: string; supported: boolean; lockRegenerated?: boolean };
   // WS8: findings the runner tools reported, normalised and deduplicated (scanners/), with the measured score. `basis` says which
   // run the list and score come from (the patched run when there is one). baseline/patched hold both runs' summaries when both exist.
-  measured?: { basis: 'patched' | 'baseline'; analysis: MeasuredAnalysis; baseline?: MeasuredSummary; patched?: MeasuredSummary };
+  // `enrichment` says which KEV/EPSS lookups were made for the findings and which feed was unavailable.
+  measured?: { basis: 'patched' | 'baseline'; analysis: MeasuredAnalysis; baseline?: MeasuredSummary; patched?: MeasuredSummary; enrichment?: EnrichmentInfo };
 }
 
 // Optional feed provenance: which outside sources were consulted and when.
@@ -108,7 +110,35 @@ export interface ReportMeasured {
   omitted: number; // deduplicated findings beyond MAX_MEASURED_FINDINGS
   note: string; // states that the two scores differ in what they cover
   staticCheck?: { packagesInBoth: string[]; advisoriesConfirmed: number };
+  /** KEV/EPSS lookups made for these findings; `unavailable` names feeds that could not be used (ranking then used what was left). */
+  enrichment?: { cves: number; unavailable: string[] };
 }
+
+// Optional AWS section (generate_report include_cloud). Its own group: never part of `findings`, `measured` or any score of the
+// repository. `status` says whether a scan ran; the other two statuses carry only a short fixed sentence in `summary`.
+export interface ReportCloudFinding extends ReportFinding {
+  service: string;
+  region: string;
+  resource: string; // resource id or name as AWS reports it (untrusted text, cleaned)
+}
+
+export interface ReportCloud {
+  status: 'scanned' | 'not-configured' | 'failed';
+  heading: string;
+  summary: string;
+  regions: string[];
+  counts: Array<{ service: string; count: Labelled<number> }>;
+  findings: ReportCloudFinding[]; // ranked, at most the inventory's cap
+  findingsTotal: number;
+  moreFindings: number;
+  notChecked: Array<{ service: string; region?: string; code: string; note?: string }>;
+  limits: string[];
+  note: string;
+  generatedAt?: string;
+}
+
+export const CLOUD_SOURCE = 'AWS read-only inventory (assumed role)';
+export const CLOUD_FINDING_SOURCE = 'aws-readonly';
 
 export interface ReportDependency {
   ecosystem: 'npm' | 'composer';
@@ -173,6 +203,7 @@ export interface ReportData {
   // analysed folder) so SARIF can point at the line that declares a package. Never rendered into the PDF.
   manifests?: Record<string, string>;
   measured?: ReportMeasured;
+  cloud?: ReportCloud;
   tools: Array<{ name: string; version: string }>;
   sources: Array<{ name: string; url?: string; fetchedAt: string }>; // fetchedAt: ISO time, "unavailable" (feed was down) or "not recorded"
 }
@@ -331,8 +362,25 @@ function measuredOf(m: NonNullable<RunnerSummary['measured']>, staticScore: numb
     findings: listed,
     omitted: Math.max(0, a.findings.length - listed.length),
     note: SCORES_DIFFER_NOTE,
-    ...(a.staticCheck ? { staticCheck: a.staticCheck } : {})
+    ...(a.staticCheck ? { staticCheck: a.staticCheck } : {}),
+    ...(m.enrichment ? { enrichment: { cves: m.enrichment.cves, unavailable: [...m.enrichment.unavailable] } } : {})
   };
+}
+
+// Adds feed sources by name. A real fetch time beats "unavailable", and the first real fetch time stays (same rule as feed-sources.ts).
+export function mergeSources(base: ReportData['sources'], extra: Array<{ name: string; url?: string; fetchedAt?: string }>): ReportData['sources'] {
+  const map = new Map(base.map((s) => [s.name, s]));
+  for (const s of extra) {
+    const name = cleanText(s.name, 120);
+    if (!name) continue;
+    const cur = map.get(name);
+    const at = opt(s.fetchedAt, 40) ?? NOT_RECORDED;
+    if (!cur || cur.fetchedAt === 'unavailable' || cur.fetchedAt === NOT_RECORDED) {
+      const url = opt(s.url, 300) ?? cur?.url;
+      map.set(name, { name, ...(url ? { url } : {}), fetchedAt: at });
+    }
+  }
+  return [...map.values()];
 }
 
 const CHECK_STATUS = new Set(['passed', 'failed', 'skipped']);
@@ -344,7 +392,47 @@ export function attachRunnerResult(data: ReportData, summary: RunnerSummary): Re
   if (typeof summary?.runner !== 'string' || !Array.isArray(summary.checks) || summary.checks.some((c) => !CHECK_STATUS.has(c?.status))) {
     throw new TypeError('Invalid runner summary: expected a runner name and checks with status passed, failed or skipped.');
   }
-  return { ...data, verification: verificationOf(summary), tools: [...data.tools, ...runnerTools(summary)], ...(summary.measured ? { measured: measuredOf(summary.measured, data.score.value) } : {}) };
+  return {
+    ...data,
+    verification: verificationOf(summary),
+    tools: [...data.tools, ...runnerTools(summary)],
+    ...(summary.measured ? { measured: measuredOf(summary.measured, data.score.value) } : {}),
+    sources: mergeSources(data.sources, summary.measured?.enrichment?.sources ?? [])
+  };
+}
+
+// Returns a new ReportData with the cloud section; texts from AWS are cleaned again here (they are untrusted). The repository
+// score, counts and findings are not touched.
+export function attachCloud(data: ReportData, cloud: ReportCloud): ReportData {
+  const c = (v: unknown, n: number) => cleanText(v, n);
+  const clean: ReportCloud = {
+    status: cloud.status,
+    heading: c(cloud.heading, 120),
+    summary: c(cloud.summary, 400),
+    regions: cloud.regions.map((r) => c(r, 30)).filter(Boolean).slice(0, 6),
+    counts: cloud.counts.map((x) => ({ service: c(x.service, 30), count: { value: x.count.value, origin: 'measured' as const, source: CLOUD_SOURCE } })),
+    findings: cloud.findings.map((f) => ({
+      ...f,
+      id: c(f.id, 200),
+      title: c(f.title, 300),
+      ...(opt(f.evidence, 300) ? { evidence: opt(f.evidence, 300) } : {}),
+      recommendation: c(f.recommendation, 300),
+      rankReason: c(f.rankReason, 80),
+      source: CLOUD_FINDING_SOURCE,
+      service: c(f.service, 30),
+      region: c(f.region, 30),
+      resource: c(f.resource, 200),
+      kev: false
+    })),
+    findingsTotal: cloud.findingsTotal,
+    moreFindings: cloud.moreFindings,
+    notChecked: cloud.notChecked.map((n) => ({ service: c(n.service, 30), ...(n.region ? { region: c(n.region, 30) } : {}), code: c(n.code, 64), ...(n.note ? { note: c(n.note, 200) } : {}) })),
+    limits: cloud.limits.map((l) => c(l, 200)),
+    note: c(cloud.note, 400),
+    ...(cloud.generatedAt ? { generatedAt: c(cloud.generatedAt, 40) } : {})
+  };
+  const at = clean.generatedAt ?? data.meta.generatedAt;
+  return { ...data, cloud: clean, sources: clean.status === 'scanned' ? mergeSources(data.sources, [{ name: CLOUD_SOURCE, fetchedAt: at }]) : data.sources };
 }
 
 export interface BuildReportInput {

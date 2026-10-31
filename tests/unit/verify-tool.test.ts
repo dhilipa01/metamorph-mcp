@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,9 @@ import { toViewModel, MAX_CHECKS, MAX_REASONS, type VerifyVM } from '../../src/w
 import { CONFIG, FakeGithub, TOKEN, resultZip } from '../helpers/fake-github.js';
 import { writeNodeFixture } from '../helpers/fixtures.js';
 import { tgzOf } from '../helpers/tar.js';
+
+// These tests exercise the runner and scoring, not the feeds: no KEV/EPSS lookups (the enrichment has its own tests).
+vi.mock('../../src/modules/scanners/enrich.js', async (orig) => ({ ...(await orig<typeof import('../../src/modules/scanners/enrich.js')>()), liveEnrichClients: () => ({}) }));
 
 const fixture = (n: string) => readFileSync(new URL(`../fixtures/runner/${n}`, import.meta.url), 'utf8');
 const BEFORE = fixture('php-shop-before.json');

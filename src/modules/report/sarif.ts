@@ -215,6 +215,7 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
         category: f.category,
         origin: d.measured?.origin,
         sources: f.sources,
+        rankReason: f.rankReason,
         ...(f.aliases.length ? { aliases: f.aliases } : {}),
         ...(f.package ? { package: f.package } : {}),
         ...(f.severityNote ? { severityNote: f.severityNote } : {}),
@@ -224,6 +225,35 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
       }
     };
   });
+
+  // Cloud findings (include_cloud): rules and results of their own, no file (a logical location with the resource and region),
+  // properties.sources ['aws-readonly']. They are not part of the repository findings above.
+  for (const f of d.cloud?.findings ?? []) {
+    if (ruleIndex.has(f.id)) continue;
+    ruleIndex.set(f.id, rules.length);
+    rules.push({
+      id: f.id,
+      shortDescription: { text: f.title || f.id },
+      help: { text: f.recommendation || 'See the finding message.' },
+      defaultConfiguration: { level: LEVEL[f.severity] },
+      properties: { tags: ['cloud', 'aws', 'end-of-life'], 'security-severity': DEFAULT_SECURITY_SEVERITY[f.severity] }
+    });
+  }
+  const cloudResults = (d.cloud?.findings ?? []).map((f) => ({
+    ruleId: f.id,
+    ruleIndex: ruleIndex.get(f.id) ?? 0,
+    level: LEVEL[f.severity],
+    message: { text: `${f.title}${f.evidence ? ` (${f.evidence})` : ''}. ${f.recommendation}`.trim() },
+    locations: [{ logicalLocations: [{ name: f.resource, fullyQualifiedName: `aws/${f.region}/${f.service}/${f.resource}`, kind: 'resource' }] }],
+    properties: {
+      sources: ['aws-readonly'],
+      severity: f.severity,
+      category: f.category,
+      service: f.service,
+      region: f.region,
+      rankReason: f.rankReason
+    }
+  }));
 
   return {
     $schema: SARIF_SCHEMA,
@@ -235,7 +265,7 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
         ...(d.meta.commitSha
           ? { versionControlProvenance: [{ repositoryUri: d.meta.repoUrl, revisionId: d.meta.commitSha, ...(d.meta.subfolder ? { mappedTo: { uriBaseId: 'SRCROOT', uri: d.meta.subfolder } } : {}) }] }
           : {}),
-        results: [...results, ...measuredResults]
+        results: [...results, ...measuredResults, ...cloudResults]
       }
     ]
   };

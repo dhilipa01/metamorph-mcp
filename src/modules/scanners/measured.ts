@@ -82,6 +82,7 @@ export interface MeasuredSummary {
   collapsed: number;
   perTool: Array<{ tool: string; reported: number }>;
   notListed: number; // findings beyond the runner's cap; the score does not include them
+  knownExploited: number; // distinct findings listed by CISA KEV (0 when KEV data was not available)
 }
 
 export function summarizeMeasured(a: MeasuredAnalysis): MeasuredSummary {
@@ -93,7 +94,8 @@ export function summarizeMeasured(a: MeasuredAnalysis): MeasuredSummary {
     reported: a.dedupe.before,
     collapsed: a.dedupe.collapsed,
     perTool: a.perTool.filter((t) => t.reported > 0 || t.status === 'pass' || t.status === 'fail').map((t) => ({ tool: t.tool, reported: t.reported })),
-    notListed: a.notListed
+    notListed: a.notListed,
+    knownExploited: a.findings.filter((f) => f.kev === true).length
   };
 }
 

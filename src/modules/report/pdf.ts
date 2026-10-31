@@ -515,12 +515,14 @@ function measuredRow(f: ReportMeasuredFinding): Node[] {
       stack: [
         { text: safeText(f.title), style: 'td' },
         { text: safeText(`Fix: ${f.recommendation}`), style: 'tdMuted' },
+        { text: safeText(`Ranked: ${f.rankReason}`), style: 'tdMuted' },
         ...(f.severityNote ? [{ text: safeText(`Severity: ${f.severityNote}`), style: 'tdMuted' }] : [])
       ]
     },
     td(f.sources.join(', ') || '-'),
     td(f.cwe.join(', ') || '-'),
     td(f.owasp.join(', ') || '-'),
+    td(f.epss ? f.epss.value.toFixed(3) : '-'),
     td(f.kev ? 'YES' : '-', f.kev ? { bold: true } : {})
   ];
 }
@@ -558,13 +560,75 @@ function measuredSection(d: ReportData, caps: Caps): Node[] {
   out.push(h2(`Top ${top.length} distinct findings, KEV first, then severity and EPSS`));
   out.push(
     table({
-      widths: [44, '*', 76, 44, 44, 34],
-      header: ['Severity', 'Finding and fix', 'Reported by', 'CWE', 'OWASP', 'KEV\nreported'],
+      widths: [40, '*', 70, 38, 38, 32, 32],
+      header: ['Severity', 'Finding and fix', 'Reported by', 'CWE', 'OWASP', 'EPSS\nreported', 'KEV\nreported'],
       rows: top.map(measuredRow)
     })
   );
+  const en = m.enrichment;
+  if (en && en.cves > 0) {
+    out.push(note(en.unavailable.length > 0 ? `KEV and EPSS were looked up for ${en.cves} CVE ids. ${en.unavailable.join(' and ')} could not be reached, so the order below uses the data that was available (severity first when KEV or EPSS is missing). Fetch times are in Appendix C.` : `KEV and EPSS were looked up for ${en.cves} CVE ids; fetch times are in Appendix C. Findings without a CVE id carry neither.`));
+  } else if (!en) {
+    out.push(note('KEV and EPSS were not looked up for these findings, so the order below is by severity.'));
+  }
   out.push(note('CWE and OWASP appear only where the tool listed a CWE or OWASP category, or where a listed CWE is in the OWASP Top 10 (2021) table. Nothing is guessed.'));
   if (m.findings.length > top.length) out.push(note(`${m.findings.length - top.length} more distinct findings are listed in Appendix E.`));
+  return out;
+}
+
+// Optional AWS section (include_cloud). Separate from the repository findings and score; nothing here is added to either.
+function cloudSection(d: ReportData): Node[] {
+  const c = d.cloud;
+  if (!c) return [];
+  const out: Node[] = [h1('Cloud inventory (AWS, read-only)', true)];
+  out.push(para(c.summary));
+  if (c.status !== 'scanned') return out;
+  out.push(para(c.note));
+  out.push(note('This section is kept apart from the repository: its findings are not in the repository score, the findings list or the runner results. Counts are measured through the read-only role; end-of-life dates are reported by the source named in each finding.'));
+  if (c.counts.length > 0) {
+    out.push(h2('Resources per service'));
+    out.push(table({ widths: ['*', 120], header: ['Service', 'Resources (measured)'], rows: c.counts.map((x) => [td(x.service), td(label(x.count))]) }));
+  }
+  if (c.findings.length === 0) {
+    out.push(para('No end-of-life findings in the services that could be read.'));
+  } else {
+    out.push(h2(`Findings (${c.findings.length}${c.moreFindings > 0 ? ` of ${c.findingsTotal}` : ''}), ranked by severity`));
+    out.push(
+      table({
+        widths: [44, '*', 96, 62],
+        header: ['Severity', 'Finding and fix', 'Resource', 'Region'],
+        rows: c.findings.map((f) => [
+          td(f.severity, { bold: true }),
+          {
+            stack: [
+              { text: safeText(f.title), style: 'td' },
+              { text: safeText(`Fix: ${f.recommendation}`), style: 'tdMuted' },
+              { text: safeText(`Ranked: ${f.rankReason}`), style: 'tdMuted' },
+              ...(f.evidence ? [{ text: safeText(`Evidence: ${f.evidence}`), style: 'tdMuted' }] : []),
+              { text: safeText(`Source: ${f.source ?? 'aws-readonly'}`), style: 'tdMuted' }
+            ]
+          },
+          td(`${f.service} ${f.resource}`),
+          td(f.region)
+        ])
+      })
+    );
+    if (c.moreFindings > 0) out.push(note(`${c.moreFindings} more findings were found and are not listed (the scan lists at most ${c.findings.length}).`));
+  }
+  if (c.limits.length > 0) {
+    out.push(h2('Limits of this scan'));
+    out.push(table({ widths: ['*'], header: ['Limit'], rows: c.limits.map((l) => [td(l)]) }));
+  }
+  if (c.notChecked.length > 0) {
+    out.push(h2('Not checked'));
+    out.push(
+      table({
+        widths: [60, 70, 100, '*'],
+        header: ['Service', 'Region', 'AWS error code', 'Note'],
+        rows: c.notChecked.map((n) => [td(n.service), td(n.region ?? '-'), td(n.code), td(n.note ?? '-')])
+      })
+    );
+  }
   return out;
 }
 
@@ -744,6 +808,7 @@ export function buildDocDefinition(d: ReportData, caps: Caps = DEFAULT_CAPS, max
       ...patchSection(d, caps),
       ...verificationSection(d),
       ...measuredSection(d, caps),
+      ...cloudSection(d),
       ...dependencySection(d, caps),
       ...appendix(d, caps),
       ...measuredAppendix(d, caps)
