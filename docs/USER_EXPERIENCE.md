@@ -1,0 +1,53 @@
+# User experience spec: choices, onboarding, caveats
+
+Source: owner direction of 2026-10-31 plus decisions already in PLAN_V2.md and EXECUTION_PLAN.md. Nothing here is a new feature idea; items marked OPEN are decisions still to make. Build to this document; if code and this document disagree, fix one of them.
+
+## 1. Who and what
+Teams that own legacy PHP or Node apps (mostly private repos) and need to know what matters first, apply safe fixes, and show proof. Metamorph is worth using only where it combines triage, verified fixes, one-call workflow and a forwardable report; plain version bumps lose to Dependabot/Renovate (see EXECUTION_PLAN section L).
+
+## 2. Value order (build and demo in this order)
+1. **Triage across everything**: dependencies, runtime end-of-life dates, code risks, secrets, Docker/CI. Ranked by whether a flaw is being exploited now (CISA known-exploited list) and how likely it is (EPSS), then severity; not by raw count.
+   - Build status: the data fields exist on findings (kev, epss, cvss, cwe, owasp). The ranking itself is not built: today findings and `topFindings` sort by severity only. TODO: sort and group by exploited, then EPSS, then severity, and show why each item is ranked where it is.
+2. **A fix that was verified** (runner result, not projection).
+3. **One call from the AI client**, one approval, ending in a branch pull request (merge stays manual).
+4. **A report to forward** (PDF, SARIF, SBOM).
+5. **Ongoing watch** of new advisories for the user's stack.
+
+## 3. Choices the user always has
+- **What to run**: assess only (read), plan, preview a stage, apply a stage, or the whole sequence. Existing goal options: `patch_advisory` (dependency fixes only), `upgrade_runtime`, `modernize_all`.
+- **Stage by stage**: every automated stage is previewed as a diff before anything is applied; approval is explicit per stage (signed token, 300s).
+- **Where the fix goes**: Metamorph never edits the user's repo directly. The user gets a patch to apply themselves, or (once the GitHub connector exists) a pull request on a branch. Merging is always manual and the PR text says so.
+- **Verified or projected**: results say which. Projected = estimate on a temporary copy; verified = measured by tools in the isolated runner.
+- **Integration mode** (EXECUTION_PLAN section G): artifact mode (Metamorph returns the ticket, PR text or message payload; the user's own client MCP submits it) or direct mode (Metamorph calls the provider using the credentials the user connected).
+- **Which repos Metamorph can read**: public repos by URL; private repos only through a GitHub App installation where the customer picks the repos. Read-only for assessment; write only to the pull-request branch.
+
+## 4. Scope statement (README must say)
+- Core: upgrade, not rewrite. Examples: PHP 7.4 to 8.4, Node 14 to 22, with dependency and code fixes, verified by the runner (Rector for PHP upgrades; Node upgrades through engines/dependencies/CI).
+- PHP to Node (language conversion) is out of scope. IBM Cloud is out of scope.
+- Supported sources today: public GitHub repositories. Private repositories require the GitHub App (in build). Other hosts (GitLab, Bitbucket): OPEN, not planned.
+
+## 5. Onboarding (target: under 5 minutes, unaided)
+README quickstart in this order: get a Metamorph key (scope explained: read, plan, write) -> connect the MCP client (URL ends in `/mcp`, Bearer key) -> first call `assess_project` on a repo -> read the result -> plan -> preview -> approve -> apply. Each step shows the expected output. Errors always say the next step (existing examples: missing `/mcp` -> `Cannot POST /`; wrong key -> 401; low scope -> 403; invalid token -> "Call preview_changes again and pass its approvalToken unchanged"). The test is a person who did not build it finishing the quickstart in 5 minutes; record where they get stuck.
+OPEN: how a new user obtains a key (the owner issues keys today).
+
+## 6. Honest failure behaviour (each needs a defined message and a test)
+| Situation | Required behaviour |
+|---|---|
+| Large repo or monorepo | Stop at the existing size/file limits, say which limit was hit and suggest the `subfolder` option; never silently assess part of it |
+| No lockfile | Say versions are approximate (already flagged in the assessment) and that verification is weaker |
+| No tests | Report "unverified: no tests found". Never show a green check or a verified label |
+| Flaky tests | Rerun once; if results differ, report "flaky" with both outcomes; never count as pass |
+| Runner timeout | Report the timeout, which checks finished, and the run id so the user can resume or fetch the result |
+| Feed or scanner unavailable | Name it as unavailable in the result; the rest still returns (already how `check_watch` works) |
+| Patch fails to apply or build fails after patch | Say so, show the failing step, return no success label |
+| Secrets found | Show key names and file paths only, never values; list the rotation and history-purge steps (already built for committed env files) |
+
+## 7. Caveats that must appear in output or README
+- A score of 100 means nothing our checks detect, not "modern" or "secure".
+- Projected numbers are estimates; only runner results are measured.
+- Removing a committed `.env` from the repo does not remove the secret from git history; rotate every secret.
+- Findings for which no automated fix exists are guidance only.
+- Results depend on advisory data (OSV and feeds) available at the time of the call; each result carries source and fetch time where built.
+
+## 8. What counts as ready
+As in EXECUTION_PLAN section L: acceptance demo on 3 repos we did not write (1 private through the GitHub App), verified-fix PR passes build and tests or states why not, quality-harness report published, unaided 5-minute onboarding, README claims equal measured results.
