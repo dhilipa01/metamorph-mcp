@@ -32,3 +32,7 @@ export const RETURNS_PATCH_ONLY: ToolAnnotations = { readOnlyHint: true, destruc
 // never touches the user's repository. Not idempotent: each start creates two new runs (resuming with run ids does not).
 // Open world: it calls the GitHub API and downloads the result artifact.
 export const DISPATCHES_RUNS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+
+// Read-only look at the user's cloud account through an assumed read-only role (cloud_inventory): reads, never changes anything,
+// same answer for the same account state, talks to an outside system.
+export const READS_CLOUD_ACCOUNT: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };

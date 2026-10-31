@@ -67,7 +67,8 @@ describe('which scope each tool demands (read from the source, so a silent downg
     preview_changes: "scopeGuard('read')",
     generate_report: "scopeGuard('read')",
     apply_stage: "scopeGuard('write')",
-    verify_patch: "scopeGuard('write')"
+    verify_patch: "scopeGuard('write')",
+    cloud_inventory: "scopeGuard('read')"
   };
   it('every tool has exactly one scope guard, as expected', () => {
     expect(declared).toEqual(EXPECTED);

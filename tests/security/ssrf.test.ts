@@ -291,6 +291,8 @@ describe('no other caller-controlled location, no new outbound host', () => {
       'api.first.org', // EPSS
       'api.github.com', // runner (fixed repo from env)
       'api.osv.dev', // OSV
+      'aws.amazon.com', // documentation link in a source label (src/modules/cloud/eol-source.ts), never fetched
+      'docs.aws.amazon.com', // documentation link in a source label, never fetched
       'endoflife.date',
       'github.com', // links and parsing only
       'google.github.io', // doc link in the report
