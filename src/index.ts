@@ -13,6 +13,7 @@ import 'dotenv/config';
 import { McpApplicationFactory } from '@nitrostack/core';
 import { AppModule } from './app.module.js';
 import { registerReportRoutes, type AppLike } from './modules/report/download.js';
+import { installValidationDeferral } from './common/sdk-validation.js';
 
 /**
  * Bootstrap the application
@@ -20,6 +21,8 @@ import { registerReportRoutes, type AppLike } from './modules/report/download.js
 async function bootstrap() {
   // Create and start the MCP server
   const server = await McpApplicationFactory.create(AppModule);
+  // Tools validate their own input after the auth guard (friendly messages); let the SDK's schema failure pass to them.
+  await installValidationDeferral(server);
   await server.start();
   // Signed report downloads live on the same Express app as /mcp. STDIO-only runs have no HTTP transport and no links.
   const http = server.getHttpTransport?.();

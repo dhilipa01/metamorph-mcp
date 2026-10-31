@@ -1,4 +1,5 @@
-import { ToolDecorator as Tool, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { READS_PUBLIC_DATA } from '../../common/tool-annotations.js';
 import { OsvClient } from './osv.client.js';

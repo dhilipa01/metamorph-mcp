@@ -1,4 +1,5 @@
-import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { DISPATCHES_RUNS } from '../../common/tool-annotations.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';

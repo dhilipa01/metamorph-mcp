@@ -1,4 +1,5 @@
-import { ToolDecorator as Tool, ResourceDecorator as Resource, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ResourceDecorator as Resource, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { Tool } from '../../common/validated-tool.js';
 import { READS_CLOUD_ACCOUNT } from '../../common/tool-annotations.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { CloudError, REGION_RE, scrubAws } from './aws-config.js';

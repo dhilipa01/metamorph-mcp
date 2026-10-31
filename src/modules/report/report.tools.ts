@@ -1,4 +1,5 @@
-import { ToolDecorator as Tool, ResourceDecorator as Resource, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ResourceDecorator as Resource, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { Tool } from '../../common/validated-tool.js';
 import { requestKeyId, scopeGuard } from '../../common/auth/scope.guard.js';
 import { GENERATES_REPORT } from '../../common/tool-annotations.js';
 import { assessFull } from '../assessment/assess.js';

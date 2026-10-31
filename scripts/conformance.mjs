@@ -24,11 +24,10 @@ const MAX_DEPTH = 2;
 const OUTPUT_BUDGET_CHARS = 20_000; // about 5,000 tokens per tool result
 const CALL_TIMEOUT_MS = 90_000;
 
-// Known, documented gaps. Keys are check ids (or id prefixes).
-const KNOWN_GAPS = {
-  'invalid-input/schema':
-    'Schema-level validation errors are produced inside the MCP SDK (McpServer.registerTool validates against the advertised JSON Schema before any handler, guard or filter runs) and read "Input validation error: Invalid arguments for tool X: data/field must be string"; NitroStack 1.1.2 exposes no hook to rewrite them. Mitigation: list inputs also accept a single item (analyze_advisory ids and packages, check_watch cve_ids and products), and every error raised by our own code names a next step.'
-};
+// Known, documented gaps. Keys are check ids (or id prefixes). Empty: schema-level input errors used to be one
+// (the SDK validates before any guard and its text names no next step); src/common/sdk-validation.ts and
+// src/common/validated-tool.ts now answer them with a message that names the next step (docs/EVAL_RESULTS.md section 1).
+const KNOWN_GAPS = {};
 
 const results = [];
 const record = (id, status, detail) => results.push({ id, status, detail });
@@ -182,8 +181,15 @@ async function main() {
     );
     for (const { tool, r } of invalid) {
       const text = textOf(r);
-      check(`invalid-input/schema:${tool}`, isToolError(r) && NEXT_STEP.test(text), isToolError(r) ? `"${text.replace(/\s+/g, ' ').slice(0, 140)}"` : 'call did not return isError');
+      // The friendly shape: names the tool, the field and problem, a next step and an example; never the SDK's raw "data/field must be" text.
+      const friendly = new RegExp(`^(Error: )?Invalid input for ${tool}: .+ Next step: .+`).test(text) && !/Input validation error|data\//.test(text) && !text.includes('12345');
+      check(`invalid-input/schema:${tool}`, isToolError(r) && NEXT_STEP.test(text) && friendly, isToolError(r) ? `"${text.replace(/\s+/g, ' ').slice(0, 140)}"` : 'call did not return isError');
     }
+    // A too-short value (a constraint the SDK used to reject with "must NOT have fewer than 10 characters") and a bad enum.
+    const short = await call(off, 'assess_project', { repo_url: 'abc' });
+    check('invalid-input/too-short', isToolError(short) && /repo_url must be at least 10 characters long\. Next step: .*Example: /.test(textOf(short)), `"${textOf(short).replace(/\s+/g, ' ').slice(0, 200)}"`);
+    const badEnum = await call(off, 'cloud_inventory', { provider: 'gcp' });
+    check('invalid-input/bad-enum', isToolError(badEnum) && /provider must be one of: aws\. Next step/.test(textOf(badEnum)) && !textOf(badEnum).includes('gcp'), `"${textOf(badEnum).replace(/\s+/g, ' ').slice(0, 200)}"`);
     // well-formed but unusable input, rejected by our own code
     const props = (n) => tools.find((t) => t.name === n)?.inputSchema.properties ?? {};
     const repoTools = tools.filter((t) => t.inputSchema.properties?.repo_url).map((t) => t.name);
@@ -220,19 +226,24 @@ async function main() {
     const sha = (v) => createHash('sha256').update(v).digest('hex');
     const on = { NODE_OPTIONS: PRELOAD_OPT, METAMORPH_CONF_TARBALL: tarball, METAMORPH_SANDBOX_DIR: join(work, 'sandbox'), METAMORPH_KEY_CONFREAD: `read:${sha(readKey)}`, METAMORPH_KEY_CONFWRITE: `write:${sha(writeKey)}` };
     const applyArgs = { repo_url: REPO, stage: 'patch-dependencies', approval_token: 'x'.repeat(24) };
-    const [noKey, badKey, readOnWrite, readOnRead, writeOnWrite] = await Promise.all([
+    const [noKey, badKey, readOnWrite, readOnRead, writeOnWrite, noKeyBadInput, readKeyBadInput] = await Promise.all([
       call(on, 'assess_project', { repo_url: REPO }),
       call(on, 'assess_project', { repo_url: REPO }, { authorization: `Bearer ${randomBytes(12).toString('hex')}` }),
       call(on, 'apply_stage', applyArgs, { authorization: `Bearer ${readKey}` }),
       call(on, 'assess_project', { repo_url: REPO }, { authorization: `Bearer ${readKey}` }),
-      call(on, 'apply_stage', applyArgs, { authorization: `Bearer ${writeKey}` })
+      call(on, 'apply_stage', applyArgs, { authorization: `Bearer ${writeKey}` }),
+      call(on, 'assess_project', { repo_url: 12345 }),
+      call(on, 'assess_project', { repo_url: 12345 }, { authorization: `Bearer ${readKey}` })
     ]);
     check('auth/no-key-401', ran(noKey) && isToolError(noKey) && /\b401\b/.test(textOf(noKey)) && NEXT_STEP.test(textOf(noKey)), `"${textOf(noKey).slice(0, 110)}"`);
     check('auth/bad-key-401', ran(badKey) && isToolError(badKey) && /\b401\b/.test(textOf(badKey)), `"${textOf(badKey).slice(0, 110)}"`);
     check('auth/read-key-write-tool-403', ran(readOnWrite) && isToolError(readOnWrite) && /\b403\b/.test(textOf(readOnWrite)) && NEXT_STEP.test(textOf(readOnWrite)), `"${textOf(readOnWrite).slice(0, 130)}"`);
     check('auth/read-key-read-tool-allowed', ran(readOnRead) && !isToolError(readOnRead) && !/\b40[13]\b/.test(textOf(readOnRead)), isToolError(readOnRead) ? textOf(readOnRead).slice(0, 120) : 'read key passed the guard on a read tool');
     check('auth/write-key-passes-guard', ran(writeOnWrite) && !/\b40[13]\b/.test(textOf(writeOnWrite)), `write key got past the guard: "${textOf(writeOnWrite).slice(0, 110)}"`);
-    const leaked = [noKey, badKey, readOnWrite, readOnRead, writeOnWrite].some((r) => r.out.includes(readKey) || r.out.includes(writeKey) || r.out.includes(sha(readKey)));
+    // Auth runs before input errors: an unauthenticated caller with invalid input gets 401; an authorised one gets the input message.
+    check('auth/401-before-input-error', ran(noKeyBadInput) && isToolError(noKeyBadInput) && /\b401\b/.test(textOf(noKeyBadInput)) && !/Invalid input/.test(textOf(noKeyBadInput)), `"${textOf(noKeyBadInput).slice(0, 110)}"`);
+    check('auth/valid-key-gets-input-error', ran(readKeyBadInput) && isToolError(readKeyBadInput) && /Invalid input for assess_project: repo_url must be a string/.test(textOf(readKeyBadInput)), `"${textOf(readKeyBadInput).slice(0, 130)}"`);
+    const leaked = [noKey, badKey, readOnWrite, readOnRead, writeOnWrite, noKeyBadInput, readKeyBadInput].some((r) => r.out.includes(readKey) || r.out.includes(writeKey) || r.out.includes(sha(readKey)));
     check('auth/key-not-echoed', !leaked, leaked ? 'a key or key hash appeared in a tool result' : 'no key or hash in any tool result');
   } finally {
     await rm(work, { recursive: true, force: true });
