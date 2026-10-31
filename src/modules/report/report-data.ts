@@ -7,6 +7,7 @@ import type { FullAssessment } from '../assessment/assess.js';
 import { inventoryNode } from '../assessment/node-inventory.js';
 import { inventoryPhp } from '../assessment/php-inventory.js';
 import type { Category, DependencyFix, Finding, ModernizationPlan, Severity } from '../assessment/types.js';
+import { rankFindings, rankReason } from '../assessment/rank.js';
 import type { ApplyResult } from '../planning/apply.js';
 
 export type Origin = 'measured' | 'projected' | 'reported';
@@ -54,6 +55,7 @@ export interface ReportFinding {
   cvss?: Labelled<number>;
   epss?: Labelled<number>;
   kev: boolean; // origin: CISA KEV feed (reported); only ever true when listed
+  rankReason: string; // why it sits at this position: KEV first, then severity, then EPSS
   source?: string;
 }
 
@@ -95,7 +97,7 @@ export interface ReportData {
   score: Labelled<number>;
   scoreByCategory: Array<{ category: Category; score: Labelled<number> }>;
   counts: Array<{ severity: Severity; count: Labelled<number> }>;
-  findings: ReportFinding[]; // sorted: KEV, severity, EPSS, id
+  findings: ReportFinding[]; // ranked: KEV, severity, EPSS (assessment/rank.ts)
   truncatedScan: boolean;
   dependencies: ReportDependency[];
   dependencyStats: { total: Labelled<number>; checked: Labelled<number>; vulnerable: Labelled<number>; urgent: Labelled<number>; approximate: boolean };
@@ -111,6 +113,7 @@ export const TOOL_NAME = 'Metamorph';
 export const TOOL_VERSION = '1.0.0';
 export const NOT_RECORDED = 'not recorded';
 export const SHA_RE = /^[0-9a-f]{40}$/;
+export const NOT_FETCHED_BUILT_IN = 'not fetched (built-in table)';
 
 // ---- untrusted text handling ----
 
@@ -145,8 +148,6 @@ export function dependenciesFromFiles(files: Record<string, string>): ReportDepe
   return out;
 }
 
-const SEV_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
-
 function toReportFinding(f: Finding): ReportFinding {
   const source = opt(f.source, 100);
   return {
@@ -161,18 +162,9 @@ function toReportFinding(f: Finding): ReportFinding {
     ...(typeof f.cvss === 'number' && Number.isFinite(f.cvss) ? { cvss: { value: f.cvss, origin: 'reported' as const, ...(source ? { source } : {}) } } : {}),
     ...(typeof f.epss === 'number' && Number.isFinite(f.epss) ? { epss: { value: f.epss, origin: 'reported' as const, source: 'first.org EPSS' } } : {}),
     kev: f.kev === true,
+    rankReason: cleanText(f.rankReason ?? rankReason(f), 80),
     ...(source ? { source } : {})
   };
-}
-
-function sortFindings(list: ReportFinding[]): ReportFinding[] {
-  return [...list].sort(
-    (a, b) =>
-      Number(b.kev) - Number(a.kev) ||
-      SEV_RANK[b.severity] - SEV_RANK[a.severity] ||
-      (b.epss?.value ?? -1) - (a.epss?.value ?? -1) ||
-      a.id.localeCompare(b.id)
-  );
 }
 
 const m = (value: number, source?: string): Labelled<number> => ({ value, origin: 'measured', ...(source ? { source } : {}) });
@@ -218,10 +210,16 @@ export interface BuildReportInput {
 export function buildReportData(input: BuildReportInput): ReportData {
   const { full, meta, plan, apply, runner, feeds } = input;
   const a = full.assessment;
-  const findings = sortFindings(full.findings.map(toReportFinding));
+  const findings = rankFindings(full.findings).map(toReportFinding); // the same ranking assess_project and the plan use
   const dependencies = input.dependencies ?? dependenciesFromFiles(full.files);
 
   const sourceMap = new Map<string, { name: string; url?: string; fetchedAt: string }>();
+  // Sources the assessment itself relied on (live endoflife.date answers, built-in EOL tables), then the caller's feed
+  // list, which wins on a name clash. Built-in tables were never fetched, so they say so instead of "not recorded".
+  for (const s of full.sources ?? []) {
+    const name = cleanText(s.name, 120);
+    if (name) sourceMap.set(name, { name, ...(opt(s.url, 300) ? { url: opt(s.url, 300) } : {}), fetchedAt: s.builtIn ? NOT_FETCHED_BUILT_IN : (opt(s.fetchedAt, 40) ?? NOT_RECORDED) });
+  }
   for (const s of feeds?.sources ?? []) {
     const name = cleanText(s.name, 120);
     if (name) sourceMap.set(name, { name, ...(opt(s.url, 300) ? { url: opt(s.url, 300) } : {}), fetchedAt: opt(s.fetchedAt, 40) ?? NOT_RECORDED });

@@ -1,6 +1,6 @@
 import { scoreFindings } from '../assessment/score.js';
 import { shellQuote } from './patches.js';
-import { SEVERITY_RANK } from '../assessment/types.js';
+import { compareFindings } from '../assessment/rank.js';
 import type { DependencyFix, Finding, Goal, ModernizationPlan, PlanStage, StageKind } from '../assessment/types.js';
 
 type Risk = PlanStage['risk'];
@@ -102,7 +102,7 @@ function crossesMajor(fix: DependencyFix): boolean {
 function recommendations(findings: Finding[]): string[] {
   const sorted = findings
     .map((f, i) => ({ f, i }))
-    .sort((a, b) => SEVERITY_RANK[b.f.severity] - SEVERITY_RANK[a.f.severity] || a.i - b.i);
+    .sort((a, b) => compareFindings(a.f, b.f) || a.i - b.i);
   return [...new Set(sorted.map((x) => x.f.recommendation))].slice(0, MAX_STEPS);
 }
 

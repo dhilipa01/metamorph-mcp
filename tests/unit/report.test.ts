@@ -3,68 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assessFull, type Analyzer, type FullAssessment } from '../../src/modules/assessment/assess.js';
-import { scoreFindings } from '../../src/modules/assessment/score.js';
-import type { Category, Finding, Severity } from '../../src/modules/assessment/types.js';
-import { buildPlan } from '../../src/modules/planning/plan.js';
 import { MAX_PAGES, MAX_PDF_BYTES, NO_RUNNER_SENTENCE, PAGE_MARGIN, renderPdf, safeText } from '../../src/modules/report/pdf.js';
 import { ReportCache, generateReport, lookupResource, reportUri } from '../../src/modules/report/report.js';
-import { buildReportData, cleanText, type ReportData, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
+import { buildReportData, cleanText, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
 import { buildSarif, locationOf } from '../../src/modules/report/sarif.js';
 import { buildSbom, purlOf } from '../../src/modules/report/sbom.js';
-import { writePhpFixture } from '../helpers/fixtures.js';
+import { FIXTURES, NOW, dataOf, fullOf, manyFindings, phpShopReportData } from '../helpers/report-fixtures.js';
 
-const NOW = '2026-10-31T12:00:00.000Z';
-const SEVS: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
-const CATS: Category[] = ['security', 'dependencies', 'runtime', 'architecture', 'standards', 'cloud'];
-
-function fullOf(findings: Finding[], files: Record<string, string> = {}): FullAssessment {
-  return {
-    assessment: {
-      assessmentId: 'test',
-      stack: 'php',
-      runtime: { declared: '>=7.2' },
-      frameworks: [],
-      uiLibraries: [],
-      hosting: [],
-      dependencies: { total: 0, checked: 0, vulnerable: 0, urgent: 0, approximateVersions: false },
-      score: scoreFindings(findings),
-      topFindings: [],
-      findingCount: findings.length,
-      truncated: false
-    },
-    findings,
-    fixes: [],
-    files
-  };
-}
-
-function manyFindings(n: number, extra: Partial<Finding> = {}): Finding[] {
-  return Array.from({ length: n }, (_, i) => ({
-    id: `rule-${i}`,
-    category: CATS[i % CATS.length],
-    severity: SEVS[i % SEVS.length],
-    title: `Finding number ${i} with a reasonably descriptive title that wraps over more than one line in a narrow column`,
-    evidence: `src/module${i}/file${i}.php:${i + 1}`,
-    recommendation: `Replace the legacy call number ${i} with the maintained equivalent and re-run the scan.`,
-    cwe: i % 3 === 0 ? ['CWE-89'] : undefined,
-    owasp: i % 3 === 0 ? ['A03:2021'] : undefined,
-    cvss: i % 4 === 0 ? 7.5 : undefined,
-    epss: i % 5 === 0 ? 0.12345 : undefined,
-    kev: i % 17 === 0 ? true : undefined,
-    source: 'osv.dev',
-    ...extra
-  }));
-}
-
-function dataOf(findings: Finding[], opts: { deps?: ReportDependency[]; runner?: RunnerSummary; repoUrl?: string } = {}): ReportData {
-  return buildReportData({
-    full: fullOf(findings),
-    meta: { repoUrl: opts.repoUrl ?? 'https://github.com/owner/repo', generatedAt: NOW },
-    dependencies: opts.deps ?? [],
-    runner: opts.runner
-  });
-}
 
 // ---- poppler helpers (layout checks run only when installed) ----
 const have = (cmd: string) => spawnSync(cmd, ['-v'], { encoding: 'utf8' }).error === undefined;
@@ -99,23 +44,6 @@ async function bboxPages(pdf: Buffer): Promise<PageBoxes[]> {
   }
   return pages;
 }
-
-// ---- worst-case fixtures ----
-const long500 = 'a'.repeat(500);
-const slashes500 = Array.from({ length: 50 }, (_, i) => `dir${i}`).join('/') + '/file.php';
-const FIXTURES: Record<string, () => ReportData> = {
-  'zero findings': () => dataOf([]),
-  '200 findings': () => dataOf(manyFindings(200)),
-  '500-char unbroken strings': () => dataOf(manyFindings(30, { title: long500, evidence: long500, id: undefined as unknown as string }).map((f, i) => ({ ...f, id: `${long500}-${i}`, evidence: i % 2 ? slashes500 : long500 })), { repoUrl: `https://github.com/owner/${'r'.repeat(200)}` }),
-  'unicode, RTL and emoji': () =>
-    dataOf(manyFindings(12, { title: 'Привет мир Ελληνικά שלום עולם مرحبا بالعالم 你好世界 😀🔥 é café', evidence: 'src/日本語/файл.php:3', recommendation: '‮evil‬ RTL override and 🚀' })),
-  'control characters': () =>
-    dataOf(manyFindings(12, { title: 'bell\u0007 null\u0000 esc\u001B[31m red\u001B[0m tab\tand\nnewline \u0085   ​', evidence: 'x\u0000y\u0001z.php:1', recommendation: '\u0008backspace' })),
-  '1 giant dependency table': () =>
-    dataOf(manyFindings(10), {
-      deps: Array.from({ length: 6000 }, (_, i) => ({ ecosystem: i % 2 ? ('npm' as const) : ('composer' as const), name: i % 2 ? `@scope/package-${i}` : `vendor/package-${i}`, version: `1.${i}.0`, dev: i % 3 === 0, approximate: i % 5 === 0 }))
-    })
-};
 
 describe('PDF: worst-case fixtures', () => {
   for (const [name, make] of Object.entries(FIXTURES)) {
@@ -185,6 +113,31 @@ describe.runIf(!POPPLER)('PDF layout checks', () => {
 });
 
 describe('PDF content rules', () => {
+  it.skipIf(!POPPLER)('cover page shows score, severity strip, the top 3 ranked findings and the what-it-is note, and nothing spills to page 2', async () => {
+    const data = dataOf(manyFindings(40), { repoUrl: 'https://github.com/owner/repo' });
+    data.meta.commit = '0123456789abcdef0123456789abcdef01234567';
+    data.meta.subfolder = 'apps/shop';
+    const r = await renderPdf(data);
+    const dir = await tmp();
+    const f = join(dir, 'c.pdf');
+    await writeFile(f, r.buffer);
+    const page = (n: number) => spawnSync('pdftotext', ['-f', String(n), '-l', String(n), f, '-'], { encoding: 'utf8' }).stdout.replace(/\s+/g, ' ');
+    const one = page(1);
+    expect(one).toContain('Modernization assessment report');
+    expect(one).toContain('0123456789abcdef0123456789abcdef01234567'); // full sha, no break inserted
+    expect(one).toContain('apps/shop');
+    expect(one).toContain(`${data.score.value} / 100`);
+    expect(one).toContain('Origin: measured');
+    for (const label of ['Critical', 'High', 'Medium', 'Low', 'Info']) expect(one).toContain(label);
+    expect(one).toContain('A score of 100 means nothing our checks detect; projected numbers are estimates; only runner results are measured.');
+    for (const top of data.findings.slice(0, 3)) {
+      expect(one).toContain(top.rankReason);
+    }
+    expect(one).toContain(data.findings[0].title.slice(0, 20));
+    expect(one).not.toContain('Executive summary'); // that starts on page 2
+    expect(page(2)).toContain('Executive summary');
+  }, 30_000);
+
   it('says exactly that nothing was verified when no runner result is attached', async () => {
     const r = await renderPdf(dataOf(manyFindings(3)));
     expect(r.buffer.length).toBeGreaterThan(1000);
@@ -356,12 +309,7 @@ describe('cache and tool result', () => {
 describe('real sample: php-shop fixture', () => {
   it('assesses, plans and renders a PDF', async () => {
     const dir = await tmp();
-    await writePhpFixture(dir);
-    const fakeOsv: Analyzer = async (pkgs) =>
-      pkgs.map((p) => ({ package: p, affected: true, truncated: false, findings: [{ id: 'CVE-2022-31042', aliases: [], severity: 'high' as const, summary: 'test advisory', fixedVersions: ['6.5.8'], urgent: true, urgentReasons: ['known_exploited' as const], cvss: 7.5, cwes: ['CWE-200'] }] }));
-    const full = await assessFull(dir, { analyze: fakeOsv, today: new Date('2026-10-31T00:00:00Z'), epss: async () => new Map([['CVE-2022-31042', 0.04]]) });
-    const plan = buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal: 'modernize_all' });
-    const data = buildReportData({ full, plan, meta: { repoUrl: 'https://github.com/example/php-shop', commit: 'ref main', generatedAt: NOW }, feeds: { sources: [{ name: 'osv.dev', url: 'https://api.osv.dev', fetchedAt: NOW }] } });
+    const data = await phpShopReportData(dir);
     const r = await renderPdf(data);
     const out = process.env.METAMORPH_SAMPLE_PDF ?? '/tmp/metamorph-sample-php-shop.pdf';
     await writeFile(out, r.buffer);

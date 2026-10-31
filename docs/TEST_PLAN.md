@@ -46,6 +46,9 @@ Local: unit, smoke, integration, security, widget review, Playwright, Lighthouse
 5. Is anything generated flagged "needs review" for the end user?
 6. Does the build pass (`npm run build`)?
 
+## PDF accessibility check (PDF/UA-1)
+`tests/unit/report-pdfua.test.ts` renders the php-shop sample and the worst-case report fixtures and validates each PDF with veraPDF (`docker run --rm -v DIR:/data:ro verapdf/cli -f ua1 --format xml /data/report.pdf`), asserting zero failed rules. It runs only when `docker` and the image `verapdf/cli` (`docker pull verapdf/cli`) are present; otherwise the suite is skipped and a `[report-pdfua] SKIPPED: reason` line is printed. It takes about 2.5 minutes. A docker-free test in the same file checks that text is tagged real content (not Artifact) and only borders and the running header/footer are artifacts.
+
 ## Where tests run [spike S6]
 Browser tests (Playwright, Selenium, Lighthouse) run on the owner's machine or CI, not inside the hosted MCP server, unless S2 shows the host can run browsers. Contract, security and JMeter tests can target the deployed server.
 
