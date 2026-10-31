@@ -20,6 +20,8 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      - run: npm run build
+      - run: npm run conformance
       # Fails only on critical production advisories. A known high zod advisory has no fix yet; see docs/THREAT_MODEL.md.
       - run: npm audit --omit=dev --audit-level=critical
 

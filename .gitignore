@@ -45,6 +45,9 @@ uploads/
 # TypeScript cache
 *.tsbuildinfo
 
+# Real-world corpus raw results (docs/EVAL_RESULTS.md holds the published table)
+/eval/results/
+
 # Optional npm cache
 .npm/
 
