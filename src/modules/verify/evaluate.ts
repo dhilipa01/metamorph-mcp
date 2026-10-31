@@ -71,6 +71,9 @@ export function judge(patched: RunView | undefined, result: RunnerResult | undef
     if (t.ran === 0) add('no tests found');
     else if (t.failed > 0) add(`${t.failed} test${t.failed === 1 ? '' : 's'} failed`);
     else if (t.passed === 0) add('no tests passed');
+    // PHP: dependencies resolved afresh in a scratch copy do not reflect the committed lockfile, so the run cannot vouch for it.
+    if (result.php?.lockRegenerated) add('composer.lock was unusable and was regenerated in a scratch copy, so the committed lockfile was not tested');
+    if (result.php && !result.php.supported) add(`PHP ${result.php.selected ?? 'version'} is not supported by the runner image`);
   }
   return { verified: reasons.length === 0, unverifiedReasons: reasons };
 }
@@ -106,6 +109,8 @@ export function runnerResultToSummary(input: { patched?: RunnerResult; baseline?
     return { name: c.tool, status: CHECK_STATUS[c.status], ...(detail ? { detail } : {}), durationMs: c.durationMs };
   });
   const t = primary.tests;
+  // Verdict of the patched run (same rule as verify_patch). A baseline alone never verifies a patch.
+  const verdict = judge(patched ? ({ status: 'completed' } as RunView) : undefined, patched);
   const bt = baseline && patched ? baseline.tests : undefined;
   const bNote = (x: string) => (bt ? ` | baseline: ${x}` : '');
   checks.push({
@@ -125,6 +130,12 @@ export function runnerResultToSummary(input: { patched?: RunnerResult; baseline?
     runner: `github-actions${ids ? ` (${ids})` : ''}`,
     ...(starts[0] ? { startedAt: starts[0] } : {}),
     ...(ends.length ? { finishedAt: ends[ends.length - 1] } : {}),
-    checks
+    checks,
+    verified: verdict.verified,
+    unverifiedReasons: verdict.unverifiedReasons,
+    patchApplied: primary.patchApplied,
+    buildOk: primary.buildOk,
+    tests: { ...primary.tests },
+    ...(primary.php ? { php: { ...primary.php } } : {})
   };
 }

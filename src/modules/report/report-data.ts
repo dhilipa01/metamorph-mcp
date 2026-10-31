@@ -28,6 +28,15 @@ export interface RunnerSummary {
   tools?: Array<{ name: string; version: string }>;
   scoreBefore?: number; // measured by the runner
   scoreAfter?: number;
+  // Runner-evaluated verdict (verify/evaluate.ts judge). The report says "verified" only when `verified` is true; a summary
+  // without a verdict is shown as not verified.
+  verified?: boolean;
+  unverifiedReasons?: string[];
+  patchApplied?: boolean;
+  buildOk?: boolean;
+  tests?: { ran: number; passed: number; failed: number };
+  // PHP version the runner chose and why (result.json `php` block), when the project is PHP.
+  php?: { selected?: string; version?: string; constraint?: string; constraintSource: string; reason: string; supported: boolean; lockRegenerated?: boolean };
 }
 
 // Optional feed provenance: which outside sources were consulted and when.
@@ -57,6 +66,7 @@ export interface ReportFinding {
   kev: boolean; // origin: CISA KEV feed (reported); only ever true when listed
   rankReason: string; // why it sits at this position: KEV first, then severity, then EPSS
   source?: string;
+  project?: string; // folder of the project the finding belongs to (multi-project runs); absent for single-project and repo-wide
 }
 
 export interface ReportDependency {
@@ -104,7 +114,23 @@ export interface ReportData {
   fixes: Array<{ ecosystem: string; name: string; from: string; to: string; urgent: boolean; dev: boolean; origin: Origin }>;
   plan?: { goal: string; stack: string; scoreBefore: Labelled<number>; scoreAfter: Labelled<number>; stages: ReportStage[] };
   patches: ReportPatch[];
-  verification?: { runner: string; startedAt?: string; finishedAt?: string; checks: RunnerSummary['checks']; scoreBefore?: Labelled<number>; scoreAfter?: Labelled<number> };
+  verification?: {
+    runner: string;
+    startedAt?: string;
+    finishedAt?: string;
+    checks: RunnerSummary['checks'];
+    scoreBefore?: Labelled<number>;
+    scoreAfter?: Labelled<number>;
+    verified: boolean; // as evaluated by the runner module: build ok AND tests ran AND passed AND no other reason
+    unverifiedReasons: string[];
+    patchApplied?: boolean;
+    buildOk?: boolean;
+    tests?: { ran: number; passed: number; failed: number };
+    php?: NonNullable<RunnerSummary['php']>;
+  };
+  // Text of the manifest and lockfiles (package.json, package-lock.json, composer.json, composer.lock; paths relative to the
+  // analysed folder) so SARIF can point at the line that declares a package. Never rendered into the PDF.
+  manifests?: Record<string, string>;
   tools: Array<{ name: string; version: string }>;
   sources: Array<{ name: string; url?: string; fetchedAt: string }>; // fetchedAt: ISO time, "unavailable" (feed was down) or "not recorded"
 }
@@ -163,15 +189,50 @@ function toReportFinding(f: Finding): ReportFinding {
     ...(typeof f.epss === 'number' && Number.isFinite(f.epss) ? { epss: { value: f.epss, origin: 'reported' as const, source: 'first.org EPSS' } } : {}),
     kev: f.kev === true,
     rankReason: cleanText(f.rankReason ?? rankReason(f), 80),
-    ...(source ? { source } : {})
+    ...(source ? { source } : {}),
+    ...(opt(f.project, 200) ? { project: opt(f.project, 200) } : {})
   };
+}
+
+const MANIFEST_BASENAMES = new Set(['package.json', 'package-lock.json', 'composer.json', 'composer.lock']);
+
+// Manifest and lockfile texts out of the assessed key files (only these four names, nothing else from the repository).
+export function manifestsFromFiles(files: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [path, text] of Object.entries(files)) {
+    if (typeof text === 'string' && MANIFEST_BASENAMES.has(path.split('/').pop() ?? '')) out[path] = text;
+  }
+  return out;
 }
 
 const m = (value: number, source?: string): Labelled<number> => ({ value, origin: 'measured', ...(source ? { source } : {}) });
 const p = (value: number, source?: string): Labelled<number> => ({ value, origin: 'projected', ...(source ? { source } : {}) });
 
 function verificationOf(runner: RunnerSummary): NonNullable<ReportData['verification']> {
+  const verified = runner.verified === true;
+  const given = (runner.unverifiedReasons ?? []).map((r) => cleanText(r, 200)).filter(Boolean);
+  const t = runner.tests;
+  const php = runner.php;
   return {
+    verified,
+    // A summary that carries no verdict is never shown as verified, and says why.
+    unverifiedReasons: verified ? [] : given.length > 0 ? given : [runner.verified === undefined ? 'the runner result carries no verdict' : 'not verified'],
+    ...(typeof runner.patchApplied === 'boolean' ? { patchApplied: runner.patchApplied } : {}),
+    ...(typeof runner.buildOk === 'boolean' ? { buildOk: runner.buildOk } : {}),
+    ...(t ? { tests: { ran: t.ran, passed: t.passed, failed: t.failed } } : {}),
+    ...(php
+      ? {
+          php: {
+            ...(opt(php.selected, 16) ? { selected: opt(php.selected, 16) } : {}),
+            ...(opt(php.version, 32) ? { version: opt(php.version, 32) } : {}),
+            ...(opt(php.constraint, 200) ? { constraint: opt(php.constraint, 200) } : {}),
+            constraintSource: cleanText(php.constraintSource, 40),
+            reason: cleanText(php.reason, 400),
+            supported: php.supported === true,
+            ...(typeof php.lockRegenerated === 'boolean' ? { lockRegenerated: php.lockRegenerated } : {})
+          }
+        }
+      : {}),
     runner: cleanText(runner.runner, 80),
     ...(opt(runner.startedAt, 40) ? { startedAt: opt(runner.startedAt, 40) } : {}),
     ...(opt(runner.finishedAt, 40) ? { finishedAt: opt(runner.finishedAt, 40) } : {}),
@@ -290,6 +351,7 @@ export function buildReportData(input: BuildReportInput): ReportData {
     })),
     ...(runner ? { verification: verificationOf(runner) } : {}),
     tools,
+    manifests: manifestsFromFiles(full.files),
     sources: [...sourceMap.values()]
   };
 }

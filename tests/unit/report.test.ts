@@ -197,7 +197,7 @@ describe('SARIF 2.1.0', () => {
     else if (typeof v === 'object' && v) for (const [k, x] of Object.entries(v)) noNulls(x, `${path}.${k}`);
   };
 
-  it('has the required structure, rule ids, cwe tags and locations only when known', () => {
+  it('has the required structure, rule ids, cwe tags and a location on every result', () => {
     const d = dataOf([...manyFindings(8), { id: 'no-loc', category: 'runtime', severity: 'high', title: 'T', evidence: '3 of 9 dependencies', recommendation: 'R' }]);
     const s = JSON.parse(JSON.stringify(buildSarif(d)));
     noNulls(s);
@@ -217,8 +217,12 @@ describe('SARIF 2.1.0', () => {
     const rule0 = run.tool.driver.rules.find((r: { id: string }) => r.id === 'rule-0');
     expect(rule0.properties.tags).toContain('external/cwe/cwe-89');
     const withLoc = run.results.find((r: { ruleId: string }) => r.ruleId === 'rule-1');
-    expect(withLoc.locations[0].physicalLocation).toEqual({ artifactLocation: { uri: 'src/module1/file1.php' }, region: { startLine: 2 } });
-    expect(run.results.find((r: { ruleId: string }) => r.ruleId === 'no-loc').locations).toBeUndefined();
+    expect(withLoc.locations[0].physicalLocation).toEqual({ artifactLocation: { uri: 'src/module1/file1.php', uriBaseId: 'SRCROOT' }, region: { startLine: 2 } });
+    // no evidence path: falls back to the project manifest or README, never a line
+    const fb = run.results.find((r: { ruleId: string }) => r.ruleId === 'no-loc');
+    expect(fb.locations[0].physicalLocation.region).toBeUndefined();
+    expect(fb.properties.locationKind).toBe('project-manifest-fallback');
+    expect(fb.message.text).toContain('Location:');
   });
 
   it('locationOf rejects absolute and traversal paths', () => {

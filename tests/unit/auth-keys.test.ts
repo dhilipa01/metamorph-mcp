@@ -61,7 +61,9 @@ describe('authorize', () => {
   });
   it('returns the key label, not the key', () => {
     const r = authorize(WRITE, 'write', table);
-    expect(r).toEqual({ ok: true, label: 'owner', scope: 'write' });
+    expect(r).toEqual({ ok: true, label: 'owner', scope: 'write', keyId: expect.stringMatching(/^[a-f0-9]{12}$/) });
+    expect(JSON.stringify(r)).not.toContain(WRITE);
+    expect(JSON.stringify(r)).not.toContain(hex(WRITE));
   });
   it('an empty table denies everything', () => {
     expect(authorize(WRITE, 'read', [])).toMatchObject({ ok: false, status: 401 });

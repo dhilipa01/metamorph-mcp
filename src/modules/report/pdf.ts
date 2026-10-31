@@ -241,6 +241,18 @@ const SEVERITY_LABEL: Record<string, string> = { critical: 'Critical', high: 'Hi
 const CONTENT_WIDTH = 595.28 - 2 * PAGE_MARGIN;
 export const COVER_NOTE = 'A score of 100 means nothing our checks detect; projected numbers are estimates; only runner results are measured.';
 
+// One line stating the verification status. "Verified" appears only when the runner-evaluated verdict is true; otherwise
+// the reasons are listed. Used on the cover and in the executive summary.
+export function verificationLine(d: ReportData): { verified: boolean; text: string } {
+  const v = d.verification;
+  if (!v) return { verified: false, text: NO_RUNNER_SENTENCE };
+  if (v.verified) {
+    const t = v.tests;
+    return { verified: true, text: `Verified by the runner (measured): the build succeeded${t ? ` and ${t.passed} of ${t.ran} tests passed` : ''}.` };
+  }
+  return { verified: false, text: `Not verified: ${v.unverifiedReasons.join('; ')}.` };
+}
+
 // A text paragraph with its own style, tagged as P.
 const styled = (text: string, style: string, extra: Node = {}): Node => ({ text: run(text, tags.document.child('P')), style, ...extra });
 
@@ -265,7 +277,8 @@ function cover(d: ReportData): Node[] {
           [th('Commit / ref'), td(d.meta.commit ?? 'not recorded (default branch at scan time)', {}, 48)],
           [th('Generated'), td(d.meta.generatedAt)],
           [th('Detected stack'), td(d.stack)],
-          [th('Declared runtime'), td(d.runtime)]
+          [th('Declared runtime'), td(d.runtime)],
+          [th('Verification'), td(verificationLine(d).text, { bold: true }, 48)]
         ]
       },
       layout: 'metamorph'
@@ -330,6 +343,8 @@ function executiveSummary(d: ReportData): Node[] {
         : `Metamorph found ${total} distinct findings (${sev('critical')} critical, ${sev('high')} high, ${sev('medium')} medium, ${sev('low')} low, ${sev('info')} informational). The overall score is ${label(d.score)} out of 100.`
     )
   );
+  const vl = verificationLine(d);
+  out.push(para(vl.text, { bold: true }));
   if (kev > 0) out.push(para(`${kev} finding(s) concern vulnerabilities listed in the CISA Known Exploited Vulnerabilities catalog (reported by the CISA feed). Treat these first.`, { bold: true }));
   if (d.truncatedScan) out.push(para('The repository was larger than the scan limit, so some files were not inspected. Counts may be lower than reality.'));
   if (d.dependencyStats.approximate) out.push(para('Some dependency versions were derived from ranges because no lockfile was present, so vulnerability results are indicative.'));
@@ -440,8 +455,27 @@ function verificationSection(d: ReportData): Node[] {
     out.push(para('Scores in this report come from static analysis of the repository, or are projected. Nothing was built, installed or tested.'));
     return out;
   }
-  out.push(para(`Runner: ${v.runner}. Started: ${v.startedAt ?? NOT_RECORDED}. Finished: ${v.finishedAt ?? NOT_RECORDED}.`));
+  const vl = verificationLine(d);
+  out.push(para(vl.text, { bold: true }));
+  if (!v.verified) {
+    out.push(h2('Why it is not verified'));
+    for (const r of v.unverifiedReasons) out.push(para(`- ${r}`));
+  }
+  out.push(para(`Runner: ${v.runner}. Started: ${v.startedAt ?? NOT_RECORDED}. Finished: ${v.finishedAt ?? NOT_RECORDED}. All values below were measured by the runner.`));
+  const yn = (b: boolean | undefined): string => (b === undefined ? 'not reported' : b ? 'yes' : 'no');
+  const rows: Node[][] = [[td('Patch applied'), td(yn(v.patchApplied))], [td('Build succeeded'), td(yn(v.buildOk))]];
+  if (v.tests) rows.push([td('Tests'), td(`${v.tests.ran} ran, ${v.tests.passed} passed, ${v.tests.failed} failed${v.tests.ran === 0 ? ' (no tests found)' : ''}`)]);
+  if (v.php) {
+    const x = v.php;
+    rows.push([td('PHP version selected'), td(`${x.version ?? x.selected ?? 'none'}${x.supported ? '' : ' (not supported by the runner image)'}`)]);
+    rows.push([td('PHP constraint'), td(`${x.constraint ?? 'none declared'} (from ${x.constraintSource})`)]);
+    rows.push([td('PHP selection reason'), td(x.reason)]);
+    if (x.lockRegenerated !== undefined) rows.push([td('composer.lock regenerated'), td(x.lockRegenerated ? 'yes: dependencies were resolved afresh in a scratch copy, the committed lockfile was not tested' : 'no')]);
+  }
+  out.push(h2('Result'));
+  out.push(table({ widths: [130, '*'], header: ['Item', 'Value'], rows }));
   if (v.scoreBefore && v.scoreAfter) out.push(para(`Score before: ${label(v.scoreBefore)}. Score after: ${label(v.scoreAfter)}. Both measured by the runner.`));
+  out.push(h2('Checks'));
   out.push(
     table({
       widths: [150, 50, '*', 60],
@@ -519,6 +553,30 @@ function appendix(d: ReportData, caps: Caps): Node[] {
       })
     );
   }
+  out.push(...knownLimits(d));
+  return out;
+}
+
+// Appendix D: what this report cannot tell you. Short and specific; every line is checkable against the code.
+function knownLimits(d: ReportData): Node[] {
+  const out: Node[] = [h1('Appendix D: known limits')];
+  const items = [
+    'Text outside Latin, Greek and Cyrillic (CJK, Arabic, Hebrew, emoji) is shown as "?" in this PDF because the bundled font has no glyphs for it. The SARIF and CycloneDX files keep the original text.',
+    'Download links are valid for 10 minutes and the files live in the memory of the one server instance that made them. After that, or after a restart or on another instance, run generate_report again. A link works for anyone who holds it until it expires; it is tied to the API key that requested the report, but it does not identify the person who clicks it.',
+    '"Measured" means a tool run by Metamorph produced the number: the static assessment of the repository files, or a runner result. "Projected" means a preview of what the score would be after a plan stage or patch; nothing was built or tested for it. "Reported" means taken from an outside feed (OSV, CISA KEV, EPSS, endoflife.date) as it was at the fetch time in Appendix C.',
+    'The score runs from 0 to 100, higher is healthier. It counts only what Metamorph checks, with weights by severity. A score of 100 means nothing the checks detect, not that the code is secure. It is not a risk rating and cannot be compared between tools.',
+    'Findings that rest on a version guessed from a range (no lockfile) count at half weight in the score and are marked as approximate.'
+  ];
+  for (const t of items) out.push(para(`- ${t}`));
+  const assessedNote = d.truncatedScan
+    ? 'The repository exceeded the scan limit, so part of it was not read.'
+    : 'No part of the repository was skipped by the scan limit.';
+  const unchecked = d.dependencyStats.total.value - d.dependencyStats.checked.value;
+  out.push(
+    para(
+      `This report covers ${d.meta.subfolder ? `the folder ${d.meta.subfolder}` : 'the repository root project'} only (a report describes one project; other projects in the repository are not assessed here). ${assessedNote} ${unchecked > 0 ? `${unchecked} of ${d.dependencyStats.total.value} direct dependencies were not checked against OSV (time or size budget).` : 'All direct dependencies were checked against OSV.'} Only direct dependencies are listed in the SBOM and checked against OSV; transitive dependencies are not.`
+    )
+  );
   return out;
 }
 
