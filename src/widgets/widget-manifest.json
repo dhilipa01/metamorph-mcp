@@ -4,12 +4,13 @@
     {
       "uri": "/score-dashboard",
       "name": "Score Dashboard",
-      "description": "Modernization score ring, category bars, top findings, dependency and runtime facts for an assessed project; also renders the staged plan from plan_modernization.",
+      "description": "Modernization score ring, category bars, top findings, dependency and runtime facts for an assessed project; also renders the staged plan from plan_modernization and the projected before/after result from apply_stage.",
       "tags": [
         "assessment",
         "score",
         "findings",
-        "plan"
+        "plan",
+        "apply"
       ],
       "examples": [
         {
@@ -182,6 +183,129 @@
             "topFindings": [],
             "findingCount": 0,
             "truncated": false
+          }
+        },
+        {
+          "name": "Modernization plan for the legacy PHP shop",
+          "description": "plan_modernization output: patch the vulnerable packages, then guided PHP and mysql API work.",
+          "data": {
+            "assessmentId": "1de79dab6aaa7982",
+            "stack": "php",
+            "goal": "modernize_all",
+            "scoreBefore": 17,
+            "scoreAfter": 92,
+            "stages": [
+              {
+                "index": 1,
+                "id": "patch-dependencies",
+                "title": "Patch vulnerable dependencies",
+                "kind": "dependencies",
+                "automated": true,
+                "risk": "low",
+                "addresses": [
+                  "dep-vulnerable:guzzlehttp/guzzle",
+                  "dep-vulnerable:symfony/http-kernel"
+                ],
+                "steps": [
+                  "Bump guzzlehttp/guzzle to 7.9.2",
+                  "Bump symfony/http-kernel to 6.4.14",
+                  "Regenerate composer.lock"
+                ],
+                "rollback": "Revert composer.json and composer.lock, then run composer install.",
+                "scoreAfter": 41
+              },
+              {
+                "index": 2,
+                "id": "upgrade-runtime",
+                "title": "Move from PHP 7.2 to PHP 8.4",
+                "kind": "runtime",
+                "automated": false,
+                "risk": "high",
+                "addresses": [
+                  "php-runtime-eol"
+                ],
+                "steps": [
+                  "Raise the php constraint in composer.json to ^8.4",
+                  "Run the test suite on PHP 8.4 and fix deprecations",
+                  "Update the Dockerfile base image"
+                ],
+                "rollback": "Keep the old runtime image until the new one has served traffic.",
+                "scoreAfter": 68
+              },
+              {
+                "index": 3,
+                "id": "replace-mysql-api",
+                "title": "Replace the removed mysql_* functions with PDO",
+                "kind": "code",
+                "automated": false,
+                "risk": "medium",
+                "addresses": [
+                  "php-mysql-api"
+                ],
+                "steps": [
+                  "Wrap connections in a PDO factory",
+                  "Convert queries to prepared statements"
+                ],
+                "rollback": "Revert the branch; no schema changes are involved.",
+                "scoreAfter": 92
+              }
+            ],
+            "hint": "Call preview_changes with stage set to an automated stage id, for example \"patch-dependencies\"."
+          }
+        },
+        {
+          "name": "Applied stage, projected 17 to 41",
+          "description": "apply_stage output for patch-dependencies on the legacy PHP shop. The patch itself is not shown in the widget.",
+          "data": {
+            "stage": {
+              "id": "patch-dependencies",
+              "index": 1,
+              "title": "Patch vulnerable dependencies",
+              "risk": "low"
+            },
+            "applied": true,
+            "mode": "projected",
+            "files": [
+              {
+                "path": "composer.json",
+                "action": "edit"
+              },
+              {
+                "path": "composer.lock",
+                "action": "edit"
+              }
+            ],
+            "scoreBefore": 17,
+            "scoreAfter": 41,
+            "scoreDelta": 24,
+            "findingsFixed": [
+              "dep-vulnerable:guzzlehttp/guzzle",
+              "dep-vulnerable:symfony/http-kernel"
+            ],
+            "remaining": [
+              {
+                "id": "php-runtime-eol",
+                "severity": "high",
+                "title": "PHP 7.2 is end of life"
+              },
+              {
+                "id": "php-mysql-api",
+                "severity": "high",
+                "title": "Uses the removed mysql_* API"
+              },
+              {
+                "id": "env-committed",
+                "severity": "medium",
+                "title": "A .env file is committed to the repository"
+              }
+            ],
+            "patch": "--- a/composer.json\n+++ b/composer.json\n@@ -5,4 +5,4 @@\n-    \"guzzlehttp/guzzle\": \"^6.3\",\n+    \"guzzlehttp/guzzle\": \"^7.9.2\",\n",
+            "howToApply": [
+              "Save the patch as fix.patch in the root of your project.",
+              "Run: git apply fix.patch",
+              "Run: composer update guzzlehttp/guzzle symfony/http-kernel"
+            ],
+            "note": "Projected from a throwaway copy. Refresh the lockfile, then run assess_project to confirm."
           }
         }
       ]

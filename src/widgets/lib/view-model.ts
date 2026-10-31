@@ -5,6 +5,9 @@ export const MAX_FINDINGS = 10;
 export const MAX_STAGES = 8;
 export const MAX_STEPS = 6;
 export const MAX_STRING = 200;
+export const MAX_FIXED = 15;
+export const MAX_REMAINING = 5;
+export const MAX_FILES = 10;
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Risk = 'low' | 'medium' | 'high';
@@ -62,11 +65,27 @@ export interface PlanVM {
   hint?: string;
 }
 
+export interface ApplyVM {
+  kind: 'apply';
+  stage: { id: string; index?: number; title: string; risk: Risk };
+  mode: 'projected';
+  scoreBefore: number;
+  scoreAfter: number;
+  scoreDelta: number;
+  findingsFixed: string[];
+  fixedCount: number;
+  remaining: Array<{ id: string; severity: Severity; title: string }>;
+  remainingCount: number;
+  files: Array<{ path: string; action: 'create' | 'edit' | 'delete' }>;
+  fileCount: number;
+  note?: string;
+}
+
 export interface EmptyVM {
   kind: 'empty';
 }
 
-export type ViewModel = AssessmentVM | PlanVM | EmptyVM;
+export type ViewModel = AssessmentVM | PlanVM | ApplyVM | EmptyVM;
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 const RISKS: Risk[] = ['low', 'medium', 'high'];
@@ -145,6 +164,41 @@ function list<T>(raw: unknown, cap: number, map: (x: unknown, i: number) => T | 
   return out;
 }
 
+function toApply(o: Record<string, unknown>, before: number, after: number): ApplyVM {
+  const st = isObj(o.stage) ? o.stage : {};
+  const fixedAll = Array.isArray(o.findingsFixed) ? o.findingsFixed.length : 0;
+  const fixed = strList(o.findingsFixed, MAX_FIXED);
+  const remainingAll = Array.isArray(o.remaining) ? o.remaining.length : 0;
+  const remaining = list(o.remaining, MAX_REMAINING, (r) => {
+    if (!isObj(r)) return undefined;
+    const title = str(r.title);
+    if (!title) return undefined;
+    return { id: str(r.id) ?? title, severity: oneOf(r.severity, SEVERITIES, 'info'), title };
+  });
+  const filesAll = Array.isArray(o.files) ? o.files.length : 0;
+  const files = list(o.files, MAX_FILES, (f) => {
+    if (!isObj(f)) return undefined;
+    const path = str(f.path);
+    if (!path) return undefined;
+    return { path, action: oneOf(f.action, ['create', 'edit', 'delete'] as const, 'edit') };
+  });
+  return {
+    kind: 'apply',
+    stage: { id: str(st.id) ?? 'stage', index: num(st.index), title: str(st.title) ?? str(st.id) ?? 'Stage', risk: oneOf(st.risk, RISKS, 'medium') },
+    mode: 'projected',
+    scoreBefore: before,
+    scoreAfter: after,
+    scoreDelta: Math.round(num(o.scoreDelta) ?? after - before),
+    findingsFixed: fixed,
+    fixedCount: Math.max(fixedAll, fixed.length),
+    remaining,
+    remainingCount: Math.max(remainingAll, remaining.length),
+    files,
+    fileCount: Math.max(filesAll, files.length),
+    note: str(o.note)
+  };
+}
+
 function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>): AssessmentVM {
   const byCat = isObj(score.byCategory) ? score.byCategory : {};
   const counts = isObj(score.counts) ? score.counts : {};
@@ -197,6 +251,11 @@ export function toViewModel(output: unknown): ViewModel {
         stages: list(o.stages, MAX_STAGES, stage),
         hint: str(o.hint)
       };
+    }
+    const before = pct(o.scoreBefore);
+    const after = pct(o.scoreAfter);
+    if (before !== undefined && after !== undefined && (o.mode === 'projected' || (isObj(o.stage) && Array.isArray(o.files)))) {
+      return toApply(o, before, after);
     }
     if (isObj(o.score) && num(o.score.overall) !== undefined) return toAssessment(o, o.score);
     return { kind: 'empty' };

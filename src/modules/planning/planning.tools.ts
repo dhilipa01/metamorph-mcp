@@ -1,4 +1,4 @@
-import { ToolDecorator as Tool, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { assessFull } from '../assessment/assess.js';
 import { withRepo } from '../assessment/repo-source.js';
@@ -44,6 +44,7 @@ export class PlanningTools {
       }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('plan'))
   async planModernization(input: Input, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';
@@ -143,6 +144,7 @@ export class PlanningTools {
       }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('write'))
   async applyStage(input: Input & { stage: string; approval_token: string }, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';

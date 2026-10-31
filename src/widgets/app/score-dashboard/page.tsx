@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
-import { scoreBand, toViewModel, type AssessmentVM, type FindingVM, type PlanVM, type Severity, type StageVM } from '../../lib/view-model';
+import { scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type Severity, type StageVM } from '../../lib/view-model';
 import './dashboard.css';
 
 const R = 52;
@@ -212,6 +212,90 @@ function Assessment({ vm }: { vm: AssessmentVM }) {
   );
 }
 
+function Apply({ vm }: { vm: ApplyVM }) {
+  const delta = vm.scoreDelta;
+  const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
+  return (
+    <>
+      <p className="projected" role="note">
+        <span className="chip guided">Projected</span> Projected result, nothing in your repo was changed.
+      </p>
+      <div className="card compare">
+        <div className="compare-col">
+          <ScoreRing score={vm.scoreBefore} label="Score before" />
+          <p className="meta">Before</p>
+        </div>
+        <div className="compare-mid">
+          <span className={`chip delta ${delta > 0 ? 'low' : delta < 0 ? 'high' : 'neutral'}`} aria-label={`Score change ${deltaText}`}>
+            {deltaText}
+          </span>
+          <span className="arrow" aria-hidden="true">
+            →
+          </span>
+        </div>
+        <div className="compare-col">
+          <ScoreRing score={vm.scoreAfter} label="Projected score after" />
+          <p className="meta">After (projected)</p>
+        </div>
+      </div>
+      <p className="meta" style={{ marginTop: 8 }}>
+        Stage {vm.stage.index !== undefined ? `${vm.stage.index}: ` : ''}
+        {vm.stage.title} · {vm.stage.risk} risk
+      </p>
+
+      <section aria-labelledby="sd-fixed">
+        <h2 id="sd-fixed">Findings fixed ({vm.fixedCount})</h2>
+        {vm.findingsFixed.length === 0 ? (
+          <div className="card muted">No findings were fixed by this stage.</div>
+        ) : (
+          <ul className="card plain">
+            {vm.findingsFixed.map((f, i) => (
+              <li key={`${f}-${i}`} className="mono">
+                {f}
+              </li>
+            ))}
+          </ul>
+        )}
+        {vm.fixedCount > vm.findingsFixed.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.findingsFixed.length} of {vm.fixedCount}.</p>}
+      </section>
+
+      <section aria-labelledby="sd-rem">
+        <h2 id="sd-rem">Still remaining ({vm.remainingCount})</h2>
+        {vm.remaining.length === 0 ? (
+          <div className="card muted">Nothing remaining.</div>
+        ) : (
+          <ul className="list">
+            {vm.remaining.map((r, i) => (
+              <li key={`${r.id}-${i}`} className="finding">
+                <div className="chips" style={{ marginTop: 0 }}>
+                  <SeverityChip severity={r.severity} />
+                </div>
+                <h3>{r.title}</h3>
+              </li>
+            ))}
+          </ul>
+        )}
+        {vm.remainingCount > vm.remaining.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.remaining.length} of {vm.remainingCount}.</p>}
+      </section>
+
+      {vm.files.length > 0 && (
+        <section aria-labelledby="sd-files">
+          <h2 id="sd-files">Files in the patch ({vm.fileCount})</h2>
+          <ul className="card plain">
+            {vm.files.map((f, i) => (
+              <li key={`${f.path}-${i}`}>
+                <span className="chip neutral">{f.action}</span> <span className="mono">{f.path}</span>
+              </li>
+            ))}
+          </ul>
+          {vm.fileCount > vm.files.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.files.length} of {vm.fileCount}.</p>}
+        </section>
+      )}
+      {vm.note && <p className="meta" style={{ marginTop: 12 }}>{vm.note}</p>}
+    </>
+  );
+}
+
 function Projection({ from, to }: { from?: number; to?: number }) {
   if (to === undefined) return null;
   return (
@@ -309,7 +393,7 @@ export default function ScoreDashboardPage() {
 
   const raw = isReady ? getToolOutput<unknown>() : null;
   const vm = useMemo(() => toViewModel(raw), [raw]);
-  const title = vm.kind === 'plan' ? 'Modernization plan' : 'Modernization score';
+  const title = vm.kind === 'plan' ? 'Modernization plan' : vm.kind === 'apply' ? 'Projected result' : 'Modernization score';
 
   return (
     <main className="sd" aria-busy={!isReady}>
@@ -324,10 +408,12 @@ export default function ScoreDashboardPage() {
       ) : vm.kind === 'empty' ? (
         <div className="card state" role="status">
           <p>No results yet.</p>
-          <p className="muted">Run assess_project or plan_modernization to see results.</p>
+          <p className="muted">Run assess_project, plan_modernization or apply_stage to see results.</p>
         </div>
       ) : vm.kind === 'plan' ? (
         <Plan vm={vm} />
+      ) : vm.kind === 'apply' ? (
+        <Apply vm={vm} />
       ) : (
         <Assessment vm={vm} />
       )}
