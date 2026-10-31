@@ -20,15 +20,14 @@ const DATA: Array<[string, () => ReturnType<typeof dataOf>]> = [
   ['1 finding', () => dataOf(manyFindings(1))],
   ['2 findings', () => dataOf(manyFindings(2))],
   ['3 findings', () => dataOf(manyFindings(3))],
-  ['5 findings', () => dataOf(manyFindings(5))],
-  ['8 findings', () => dataOf(manyFindings(8))],
-  ['40 findings', () => dataOf(manyFindings(40))],
-  ['200 findings', () => dataOf(manyFindings(200))]
+  ['5 findings', () => dataOf(manyFindings(5))]
 ];
+// A long report renders a long PDF but the result carries only counts and links, so one slow case is enough.
+const BIG: Array<[string, () => ReturnType<typeof dataOf>]> = [['200 findings', () => dataOf(manyFindings(200))]];
 
 describe('generate_report result size', () => {
   for (const [linkName, mk] of CASES) {
-    for (const [dataName, data] of DATA) {
+    for (const [dataName, data] of linkName.startsWith('relative') ? [...DATA, ...BIG] : DATA) {
       it(`stays under ${BUDGET} characters: ${linkName}, ${dataName}`, async () => {
         const res = await generateReport(data(), mk(), new ReportCache());
         const size = envelope(res);

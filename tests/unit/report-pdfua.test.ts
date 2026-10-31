@@ -12,8 +12,9 @@ import { FIXTURES, dataOf, manyFindings, phpShopReportData } from '../helpers/re
 // Without them the suite is skipped (and says why) so the normal test run stays offline and fast.
 const IMAGE = 'verapdf/cli';
 const have = spawnSync('docker', ['image', 'inspect', IMAGE], { encoding: 'utf8' });
-const AVAILABLE = have.error === undefined && have.status === 0;
-const REASON = have.error !== undefined ? 'docker is not installed' : `docker image ${IMAGE} is not available (run: docker pull ${IMAGE}) or the docker daemon is not running`;
+const OPTED_OUT = process.env.METAMORPH_SKIP_DOCKER === '1'; // for a fast local run: METAMORPH_SKIP_DOCKER=1 npm test
+const AVAILABLE = !OPTED_OUT && have.error === undefined && have.status === 0;
+const REASON = OPTED_OUT ? 'METAMORPH_SKIP_DOCKER=1' : have.error !== undefined ? 'docker is not installed' : `docker image ${IMAGE} is not available (run: docker pull ${IMAGE}) or the docker daemon is not running`;
 if (!AVAILABLE) console.warn(`[report-pdfua] SKIPPED: ${REASON}`);
 
 const dirs: string[] = [];

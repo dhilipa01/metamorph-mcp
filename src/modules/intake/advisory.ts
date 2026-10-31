@@ -59,8 +59,9 @@ async function safeKev(deps: AdvisoryDeps): Promise<Set<string>> {
 
 export function cleanText(s: unknown, max = MAX_SUMMARY): string {
   if (typeof s !== 'string') return '';
+  // control characters, zero-width characters and bidi overrides/isolates (text that reads differently from how it is stored)
   // eslint-disable-next-line no-control-regex
-  const flat = s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const flat = s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/g, ' ').replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
 }
 

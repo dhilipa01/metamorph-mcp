@@ -161,6 +161,12 @@ function runtimeFrom(
   return {};
 }
 
+// Package names and versions end up in titles and recommendations. Only identifier-shaped text is accepted, so repository
+// content cannot put a sentence there (docs/THREAT_MODEL.md, prompt injection through repository files).
+const NPM_NAME = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/;
+export const isRegistryName = (name: string): boolean => name.length <= 214 && NPM_NAME.test(name);
+export const isVersionText = (v: string): boolean => /^[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}$/.test(v);
+
 export function inventoryNode(inputs: NodeInputs): NodeInventory {
   try {
     const pkg = parseObject(inputs?.packageJson);
@@ -180,9 +186,10 @@ export function inventoryNode(inputs: NodeInputs): NodeInventory {
     const declared = new Set<string>();
     for (const [field, dev] of [['dependencies', false], ['devDependencies', true]] as const) {
       for (const [name, spec] of Object.entries(asObject(pkg[field]))) {
-        if (declared.has(name)) continue;
+        if (declared.has(name) || !isRegistryName(name)) continue; // a name with spaces or punctuation is text, not a package
         declared.add(name);
-        const exact = locked.get(name);
+        const lockedVersion = locked.get(name);
+        const exact = lockedVersion !== undefined && isVersionText(lockedVersion) ? lockedVersion : undefined;
         if (exact) {
           inv.deps.push({ name, version: exact, dev, approximate: false });
           continue;
