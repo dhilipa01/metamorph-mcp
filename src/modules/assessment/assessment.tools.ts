@@ -1,4 +1,4 @@
-import { ToolDecorator as Tool, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { assessDirectory } from './assess.js';
 import { withRepo } from './repo-source.js';
@@ -17,6 +17,7 @@ export class AssessmentTools {
       response: { stack: 'node', score: { overall: 61 }, topFindings: [{ id: 'node-runtime-eol', severity: 'high' }] }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
   async assessProject(input: { repo_url: string; subfolder?: string }, ctx: ExecutionContext) {
     return withRepo(input.repo_url, input.subfolder, ctx, (dir) => assessDirectory(dir));

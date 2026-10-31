@@ -1,5 +1,191 @@
 {
   "version": "1.0.0",
-  "widgets": [],
-  "generatedAt": "2025-01-01T00:00:00.000Z"
+  "widgets": [
+    {
+      "uri": "/score-dashboard",
+      "name": "Score Dashboard",
+      "description": "Modernization score ring, category bars, top findings, dependency and runtime facts for an assessed project; also renders the staged plan from plan_modernization.",
+      "tags": [
+        "assessment",
+        "score",
+        "findings",
+        "plan"
+      ],
+      "examples": [
+        {
+          "name": "Legacy PHP shop (score 17)",
+          "description": "Old PHP shop with a removed mysql API, end-of-life PHP and vulnerable packages.",
+          "data": {
+            "assessmentId": "1de79dab6aaa7982",
+            "stack": "php",
+            "runtime": {
+              "declared": ">=7.2"
+            },
+            "frameworks": [
+              "symfony"
+            ],
+            "uiLibraries": [],
+            "hosting": [
+              "apache-htaccess"
+            ],
+            "dependencies": {
+              "total": 2,
+              "checked": 2,
+              "vulnerable": 2,
+              "urgent": 1,
+              "approximateVersions": false
+            },
+            "score": {
+              "overall": 17,
+              "byCategory": {
+                "security": 71,
+                "dependencies": 76,
+                "runtime": 76,
+                "architecture": 100,
+                "standards": 96,
+                "cloud": 98
+              },
+              "counts": {
+                "critical": 0,
+                "high": 6,
+                "medium": 1,
+                "low": 3,
+                "info": 1
+              }
+            },
+            "topFindings": [
+              {
+                "id": "dep-vulnerable:guzzlehttp/guzzle",
+                "category": "dependencies",
+                "severity": "high",
+                "title": "guzzlehttp/guzzle@6.5.0 has 1 known advisories",
+                "evidence": "GHSA-legacy-guzzle",
+                "recommendation": "Upgrade guzzlehttp/guzzle to 9.9.9 or later."
+              },
+              {
+                "id": "dep-vulnerable:symfony/http-kernel",
+                "category": "dependencies",
+                "severity": "high",
+                "title": "symfony/http-kernel@4.4.0 has 1 known advisories (urgent)",
+                "evidence": "GHSA-legacy-httpkernel",
+                "recommendation": "Upgrade symfony/http-kernel to 9.9.9 or later."
+              },
+              {
+                "id": "php-mysql-removed-api",
+                "category": "runtime",
+                "severity": "high",
+                "title": "Uses the mysql_* API removed in PHP 7.0",
+                "evidence": "includes/db.php:3 (+2 more)",
+                "recommendation": "Migrate to PDO or mysqli with prepared statements."
+              },
+              {
+                "id": "php-version-eol",
+                "category": "runtime",
+                "severity": "high",
+                "title": "PHP 7.2 no longer receives security fixes",
+                "evidence": "PHP 7.2 ended 2020-11-30",
+                "recommendation": "Raise the PHP requirement to a version that still receives security support."
+              },
+              {
+                "id": "php-dynamic-include",
+                "category": "security",
+                "severity": "high",
+                "title": "include or require path taken from request input",
+                "evidence": "page.php:2",
+                "recommendation": "Map request values to a fixed allowlist of files before including anything."
+              },
+              {
+                "id": "php-sql-concatenation",
+                "category": "security",
+                "severity": "high",
+                "title": "SQL query built from request input",
+                "evidence": "index.php:5 (+1 more)",
+                "recommendation": "Use PDO prepared statements with bound parameters instead of building SQL strings."
+              },
+              {
+                "id": "php-weak-password-hash",
+                "category": "security",
+                "severity": "medium",
+                "title": "Password hashed with md5 or sha1",
+                "evidence": "login.php:3",
+                "recommendation": "Use password_hash and password_verify with the default algorithm."
+              },
+              {
+                "id": "no-container-packaging",
+                "category": "cloud",
+                "severity": "low",
+                "title": "No container or platform deployment config found",
+                "recommendation": "Add a Dockerfile or a platform config so deployments are repeatable."
+              },
+              {
+                "id": "no-ci",
+                "category": "standards",
+                "severity": "low",
+                "title": "No continuous integration config found",
+                "recommendation": "Add a CI workflow that runs the tests on every push."
+              },
+              {
+                "id": "php-errors-hidden",
+                "category": "standards",
+                "severity": "low",
+                "title": "Error reporting disabled or display_errors enabled in code",
+                "evidence": "includes/db.php:2",
+                "recommendation": "Configure error reporting and display_errors per environment outside the code and log errors in production."
+              }
+            ],
+            "findingCount": 11,
+            "truncated": false
+          }
+        },
+        {
+          "name": "Modernized PHP shop (score 100)",
+          "description": "The same shop after modernization: no findings.",
+          "data": {
+            "assessmentId": "47c9e15618afa4d5",
+            "stack": "php",
+            "runtime": {
+              "declared": "^8.4"
+            },
+            "frameworks": [
+              "symfony"
+            ],
+            "uiLibraries": [],
+            "hosting": [
+              "docker",
+              "github-actions"
+            ],
+            "dependencies": {
+              "total": 2,
+              "checked": 2,
+              "vulnerable": 0,
+              "urgent": 0,
+              "approximateVersions": false
+            },
+            "score": {
+              "overall": 100,
+              "byCategory": {
+                "security": 100,
+                "dependencies": 100,
+                "runtime": 100,
+                "architecture": 100,
+                "standards": 100,
+                "cloud": 100
+              },
+              "counts": {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0
+              }
+            },
+            "topFindings": [],
+            "findingCount": 0,
+            "truncated": false
+          }
+        }
+      ]
+    }
+  ],
+  "generatedAt": "2026-10-31T00:00:00.000Z"
 }
