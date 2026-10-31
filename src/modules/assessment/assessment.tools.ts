@@ -1,11 +1,13 @@
 import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
+import { READS_PUBLIC_DATA } from '../../common/tool-annotations.js';
 import { assessDirectory, assessRepository } from './assess.js';
 import { withRepo } from './repo-source.js';
 
 export class AssessmentTools {
   @Tool({
     name: 'assess_project',
+    annotations: READS_PUBLIC_DATA,
     description:
       'Assess a legacy project from a public GitHub repository. Detects the stack (Node/JavaScript, PHP), runtime end-of-life, outdated or deprecated packages, known vulnerabilities, risky legacy code patterns and hosting setup, then returns a score and the top findings. Read-only: nothing is changed.',
     inputSchema: z.object({

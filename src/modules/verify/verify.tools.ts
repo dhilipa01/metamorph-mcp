@@ -1,5 +1,6 @@
 import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
+import { DISPATCHES_RUNS } from '../../common/tool-annotations.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
@@ -22,6 +23,7 @@ interface Input {
 export class VerifyTools {
   @Tool({
     name: 'verify_patch',
+    annotations: DISPATCHES_RUNS,
     description:
       'Verify a stage patch by really building and testing it on an isolated GitHub Actions runner (the server never runs project code). Dispatches one run with the patch applied and one baseline run without it, so before and after are both measured. Needs repo_url, stage and the approval_token from preview_changes. Runs can take minutes: when not finished the result says status "running" with run ids; call again with run_id (and baseline_run_id) to resume. Returns verified true only when the build succeeded and tests ran and passed; otherwise verified is false with unverifiedReasons (for example "composer install failed", "no tests found"). Never a pass otherwise.',
     inputSchema: z.object({

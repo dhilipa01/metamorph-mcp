@@ -1,5 +1,6 @@
 import { ToolDecorator as Tool, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
+import { READS_PUBLIC_DATA, RETURNS_PATCH_ONLY } from '../../common/tool-annotations.js';
 import { assessFull } from '../assessment/assess.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
@@ -24,6 +25,7 @@ interface Input {
 export class PlanningTools {
   @Tool({
     name: 'plan_modernization',
+    annotations: READS_PUBLIC_DATA,
     description:
       'Build a staged modernization plan for a public GitHub repository: ordered stages (dependency patches, runtime upgrade, removing committed env files, packaging), each with risk, steps, rollback and the projected score. Some stages are automated, others guided. Read-only: nothing is changed. Next step: call preview_changes with an automated stage id.',
     inputSchema: z.object({
@@ -80,6 +82,7 @@ export class PlanningTools {
 
   @Tool({
     name: 'preview_changes',
+    annotations: READS_PUBLIC_DATA,
     description:
       'Preview one stage of the modernization plan: the files that would change and a unified diff, plus a short-lived approval token when the server has one configured. Guided stages return their steps instead of a diff. Read-only: nothing is changed. Use a stage id from plan_modernization.',
     inputSchema: z.object({
@@ -118,6 +121,7 @@ export class PlanningTools {
 
   @Tool({
     name: 'apply_stage',
+    annotations: RETURNS_PATCH_ONLY,
     description:
       'Apply one automated stage to a throwaway copy of the repository and return the patch plus a PROJECTED before/after score. Needs the approvalToken from preview_changes. Your repository is never modified and no project code is run: save the returned patch, run git apply, refresh the lockfile, then call assess_project to confirm.',
     inputSchema: z.object({
