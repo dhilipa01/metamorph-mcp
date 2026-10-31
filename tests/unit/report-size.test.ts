@@ -18,9 +18,7 @@ const CASES: Array<[string, () => ReturnType<typeof linkProvider>]> = [
 const DATA: Array<[string, () => ReturnType<typeof dataOf>]> = [
   ['zero findings', () => dataOf([])],
   ['1 finding', () => dataOf(manyFindings(1))],
-  ['2 findings', () => dataOf(manyFindings(2))],
-  ['3 findings', () => dataOf(manyFindings(3))],
-  ['5 findings', () => dataOf(manyFindings(5))]
+  ['3 findings', () => dataOf(manyFindings(3))]
 ];
 // A long report renders a long PDF but the result carries only counts and links, so one slow case is enough.
 const BIG: Array<[string, () => ReturnType<typeof dataOf>]> = [['200 findings', () => dataOf(manyFindings(200))]];

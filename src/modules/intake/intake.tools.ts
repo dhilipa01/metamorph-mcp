@@ -14,7 +14,7 @@ export class IntakeTools {
     name: 'analyze_advisory',
     annotations: READS_PUBLIC_DATA,
     description:
-      'Check advisories or installed packages against OSV. Give ids (CVE-, GHSA-, MAL-) to see which packages they affect and the fixed versions; give packages as "ecosystem:name@version" strings to see if you are affected, how severe, what fixes exist and whether it is urgent. Either or both.',
+      'Check advisories or installed packages against OSV. Use when the user asks whether a package version is safe or vulnerable ("is lodash 4.17.15 safe") or what a CVE or GHSA id is, what it affects and what changed. Give ids (CVE-, GHSA-, MAL-) to see which packages they affect and the fixed versions; give packages as "ecosystem:name@version" strings to see if you are affected, how severe, what fixes exist and whether it is urgent. Either or both. Read-only, needs a read key: nothing is changed, only OSV is queried. For a whole repository use assess_project; for exploited-in-the-wild status and EPSS use check_watch.',
     inputSchema: z.object({
       ids: oneOrMany(z.string().min(1).max(40), 10).optional().describe('Advisory ids, up to 10, e.g. GHSA-35jh-r3h4-6jhm'),
       packages: oneOrMany(z.string().min(3).max(300), 50).optional().describe('Installed packages, up to 50, as ecosystem:name@version, e.g. npm:lodash@4.17.15 or Packagist:guzzlehttp/guzzle@6.5.0')
@@ -41,7 +41,8 @@ export class IntakeTools {
     return {
       advisories,
       packages,
-      hint: bare ? 'Some records have no package data (common for bare CVE ids). Try the matching GHSA id or pass "packages".' : undefined
+      hint: bare ? 'Some records have no package data (common for bare CVE ids). Try the matching GHSA id or pass "packages".' : undefined,
+      nextStep: 'To check a whole repository call assess_project; for exploited-in-the-wild status and EPSS of a CVE call check_watch.'
     };
   }
 }

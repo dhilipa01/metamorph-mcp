@@ -14,6 +14,15 @@ const REPO_DESC = 'Public GitHub repository URL, e.g. https://github.com/owner/r
 const GOAL_DESC = 'What to aim for: patch_advisory (fix vulnerable packages), upgrade_runtime (also move off an end-of-life runtime) or modernize_all (default, everything)';
 const SUB_DESC = 'Optional folder inside the repository, e.g. apps/api';
 
+// The one thing to do next after a preview, named by tool.
+function nextAfterPreview(p: { automated: boolean; approvalToken?: string; files: unknown[] }): string {
+  if (!p.automated) return 'This stage is guided: follow its steps, then call assess_project to confirm.';
+  if (p.files.length === 0) return 'Nothing to change for this stage. Call plan_modernization to pick another stage, or assess_project to re-scan.';
+  return p.approvalToken
+    ? 'Review the diff. To continue call apply_stage (needs a write key) with this approvalToken; it expires in a few minutes.'
+    : 'Approval tokens are not enabled on this server, so apply_stage cannot be used. Ask the operator to set METAMORPH_TOKEN_SECRET.';
+}
+
 interface Input {
   repo_url: string;
   goal?: Goal;
@@ -27,7 +36,7 @@ export class PlanningTools {
     name: 'plan_modernization',
     annotations: READS_PUBLIC_DATA,
     description:
-      'Build a staged modernization plan for a public GitHub repository: ordered stages (dependency patches, runtime upgrade, removing committed env files, packaging), each with risk, steps, rollback and the projected score. Some stages are automated, others guided. Read-only: nothing is changed. Next step: call preview_changes with an automated stage id.',
+      'Build a staged modernization plan for a public GitHub repository. Use when the user asks for a plan, roadmap or the steps to upgrade or modernize ("give me a plan to upgrade PHP", "what are the steps to modernize this project"). Returns ordered stages (dependency patches, runtime upgrade, removing committed env files, packaging), each with risk, steps, rollback and the projected score. Some stages are automated, others guided. Read-only, needs a plan key: nothing is changed. Step 2, after assess_project. Next step: call preview_changes with an automated stage id.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe(REPO_DESC),
       goal: z.enum(GOALS).optional().describe(GOAL_DESC),
@@ -84,7 +93,7 @@ export class PlanningTools {
     name: 'preview_changes',
     annotations: READS_PUBLIC_DATA,
     description:
-      'Preview one stage of the modernization plan: the files that would change and a unified diff, plus a short-lived approval token when the server has one configured. Guided stages return their steps instead of a diff. Read-only: nothing is changed. Use a stage id from plan_modernization.',
+      'Preview one stage of the modernization plan. Use when the user wants to see the diff or the exact file changes of a stage ("show me the diff for the first stage"). Returns the files that would change and a unified diff, plus a short-lived approval token when the server has one configured. Guided stages return their steps instead of a diff. Read-only, needs a read key: nothing is changed. Step 3, after plan_modernization (use one of its stage ids). Next step: apply_stage with the approvalToken.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe(REPO_DESC),
       stage: z.string().min(1).max(60).describe('Stage id from plan_modernization, e.g. patch-dependencies'),
@@ -111,7 +120,8 @@ export class PlanningTools {
       const plan = buildPlan({ stack: assessment.stack, findings, fixes, goal });
       const patches = generatePatches({ stack: assessment.stack, files, fixes, stageIds: [input.stage] });
       try {
-        return buildPreview({ plan, stageId: input.stage, patches, secret: process.env.METAMORPH_TOKEN_SECRET });
+        const preview = buildPreview({ plan, stageId: input.stage, patches, secret: process.env.METAMORPH_TOKEN_SECRET });
+        return { ...preview, nextStep: nextAfterPreview(preview) };
       } catch (e) {
         if (!(e instanceof RangeError)) throw e;
         throw new Error(`${e.message} Call plan_modernization first (with the same goal, "${goal}") and pass one of its stage ids as "stage".`);
@@ -123,7 +133,7 @@ export class PlanningTools {
     name: 'apply_stage',
     annotations: RETURNS_PATCH_ONLY,
     description:
-      'Apply one automated stage to a throwaway copy of the repository and return the patch plus a PROJECTED before/after score. Needs the approvalToken from preview_changes. Your repository is never modified and no project code is run: save the returned patch, run git apply, refresh the lockfile, then call assess_project to confirm.',
+      'Apply one automated stage to a throwaway copy of the repository and return the patch plus a PROJECTED before/after score. Use when the user says apply, do it or go ahead after seeing the preview. Needs a write key and the approvalToken from preview_changes. Your repository is never modified and no project code is run: save the returned patch, run git apply, refresh the lockfile. Step 4. Next step: verify_patch to build and test the patch, or assess_project to re-scan.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe(REPO_DESC),
       stage: z.string().min(1).max(60).describe('Stage id from plan_modernization, e.g. patch-dependencies'),
@@ -153,8 +163,9 @@ export class PlanningTools {
   async applyStage(input: Input & { stage: string; approval_token: string }, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';
     ctx.logger.info('apply_stage', { goal, stage: input.stage });
-    return withRepo(input.repo_url, input.subfolder, ctx, (dir) =>
+    const applied = await withRepo(input.repo_url, input.subfolder, ctx, (dir) =>
       applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }),
     { requireProjectRoot: true });
+    return { ...applied, nextStep: 'Save the patch and apply it, then call verify_patch with the same repo_url, stage and approval_token to build and test it on a runner (or assess_project to re-scan).' };
   }
 }
