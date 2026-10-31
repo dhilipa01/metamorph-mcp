@@ -41,14 +41,15 @@ function patchDiff(p: FilePatch): string {
   return `--- ${p.before === undefined ? '/dev/null' : `a/${p.path}`}\n+++ ${p.after === null ? '/dev/null' : `b/${p.path}`}\n(content hidden: env file)\n`;
 }
 
-function combinedDiff(patches: FilePatch[]): string {
+// Combined unified diff of all patches, capped at maxLines. Env files show only a header.
+export function renderDiff(patches: FilePatch[], maxLines: number): string {
   const lines = patches
     .map(patchDiff)
     .join('')
     .split('\n');
   if (lines[lines.length - 1] === '') lines.pop();
-  if (lines.length <= MAX_DIFF_LINES) return lines.length === 0 ? '' : lines.join('\n') + '\n';
-  return [...lines.slice(0, MAX_DIFF_LINES), '... diff truncated'].join('\n') + '\n';
+  if (lines.length <= maxLines) return lines.length === 0 ? '' : lines.join('\n') + '\n';
+  return [...lines.slice(0, maxLines), '... diff truncated'].join('\n') + '\n';
 }
 
 export function buildPreview(input: PreviewInput): Preview {
@@ -93,7 +94,7 @@ export function buildPreview(input: PreviewInput): Preview {
     stage: head,
     automated: true,
     files: patches.map((p) => ({ path: p.path, action: action(p), reason: clean(p.reason) })),
-    diff: clean(combinedDiff(patches)),
+    diff: clean(renderDiff(patches, MAX_DIFF_LINES)),
     planHash,
     patchHash
   };
