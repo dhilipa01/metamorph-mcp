@@ -78,3 +78,27 @@ Four layers from industry practice (unit, protocol, conformance, evals), plus lo
 6. Load and resilience: JMeter against /mcp (concurrency, 123s timeout behaviour, memory under the 500 MiB limit with big repos); connector contract tests against a mock provider (429, 5xx, timeouts, partial pages, malformed JSON) run in CI; one real smoke run per provider, then dogfood on this project's own repo and the owner's real accounts.
 7. Security: path traversal, symlink escape, archive bombs, secret redaction, scope bypass, forged tokens/state, SSRF through repo_url and webhook URLs, MCP-specific scanners (Snyk Agent Scan) on our own server.
 Owner of the harness: me, built before WS9; its report goes into the README and the PDF.
+
+## L. Will it help a real user? Readiness definition (2026-10-31)
+Honest position: today it is an assessment and projection tool for public GitHub repos. It does not yet save a team work they could not already get free.
+
+Who: a small team or a security/platform lead who owns legacy PHP or Node apps, mostly in private repos, and has to show progress on CVEs and end-of-life runtimes.
+Job: "tell me what matters first, fix what is safe, prove it works, hand me something I can merge and show my manager."
+
+Where free tools already win (do not compete): version-bump pull requests (Dependabot, Renovate), single-ecosystem audits (`npm audit`, `composer audit`), PHP language upgrades (Rector itself). Metamorph is only worth using where it combines them:
+1. Triage across everything: dependencies, runtime end-of-life with dates, code smells, secrets, Docker/CI, ranked by exploited-in-the-wild (KEV) and exploit probability (EPSS), not by raw count.
+2. A fix that was verified: patch applied in an isolated runner, project tests and build run, before/after measured by tools, not projected.
+3. One call from the user's AI client, with one approval, ending in a branch pull request, tickets and a notification; merge stays manual.
+4. A report the user can forward (PDF, SARIF, SBOM).
+5. Ongoing watch of new advisories for the user's stack.
+
+Gaps that decide whether it is usable (added to the critical path):
+- **Private repositories.** Real legacy code is mostly private; we only read public repos. Fix: GitHub App install (customer picks repos), installation tokens, read-only for assess, write only for the PR branch. Becomes part of WS4 and is moved ahead of WS5 to WS8.
+- **Upgrade path over rewrite.** Real users mostly need "PHP 7.4 to 8.4" or "Node 14 to 22" with fixes, not a language rewrite. Rector-driven PHP upgrade and Node engine/dependency upgrade, verified by the runner, are the core. PHP to Node conversion is out of scope and said so in the README.
+- **Onboarding in under 5 minutes.** README quickstart for connecting a client, first call, expected output; error messages that say the next step.
+- **Failure behaviour.** Large repos, monorepos, missing lockfiles, no tests (say "unverified" instead of green), flaky tests (rerun once and report), runner timeouts (resumable by run id).
+- **Trust.** SECURITY.md, privacy statement (what is fetched, what is stored, what is never stored), audit events, licence file, pinned dependency audit clean, no secrets in logs.
+- **Cost and abuse limits.** Per-key rate limits, repo size limits, SSRF guard on every URL input, runner quotas.
+
+"Ready" means all of: (a) the acceptance demo passes on 3 repos we did not write, 1 of them private through the GitHub App; (b) on those 3 repos the verified-fix PR builds and tests pass, or the tool says exactly why not; (c) the quality harness (section K) report is published; (d) a person who did not build it completes the quickstart unaided in 5 minutes (the owner can ask one friend to try it; record where they got stuck); (e) README claims match measured results.
+Validation after the freeze, not claimed before: measure time-to-merged-PR against doing it by hand on the same three repos.
