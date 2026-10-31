@@ -1,38 +1,72 @@
 # Metamorph MCP
 
-Modernize legacy code, react to new CVEs, and score the result, from any MCP client.
-Built for the NitroStack x Fronthyre "MCP to the Moon" buildathon (Enterprise AI track) with the official NitroStack TypeScript SDK.
+MCP server that looks at a legacy repo, scores it, plans a staged upgrade, shows the exact diff, and (after explicit approval) builds the patch in a throwaway sandbox with a before/after score. Your repo is never modified. Built with the NitroStack TypeScript SDK for the NitroStack buildathon, Enterprise AI track.
 
-> **Status: early build (Oct 30 2026).** Design docs are done; tools are being built. Nothing below is claimed to work until it is listed under "Working now".
+## Hero flow
+- Legacy repo URL (public GitHub, optional subfolder)
+- `assess_project`: score out of 100 plus findings (score-dashboard widget)
+- `plan_modernization`: ordered stages with risk, steps, rollback, projected score
+- `preview_changes`: files touched plus unified diff, and a short-lived approval token
+- `apply_stage`: needs the token and a write key; patches a throwaway copy, returns the patch plus a PROJECTED before/after score
+- You run `git apply` yourself, then `assess_project` again to confirm
 
-## What it is
-- **CVE-driven upgrades:** give a CVE or advisory, learn if your project is affected, get a ranked plan.
-- **Evolve:** assess a legacy project (old Node/JS, PHP first) and plan a move to a modern, modular stack.
-- **Build (later):** idea or spec in, modern scaffold out, using the same pipeline.
-- **Scored:** every output is checked against MCP anti-patterns and the OWASP MCP Top 10.
-- **Safe by design:** read-only by default, approval before any change, writes only into a throwaway sandbox.
+## Tools (all live)
+| Tool | Scope | What it does |
+|---|---|---|
+| `analyze_advisory` | read | Checks advisory ids (up to 10) or installed packages (`ecosystem:name@version`, up to 50) against OSV. Says if affected and the fixed version |
+| `assess_project` | read | Scans a public GitHub repo (Node or PHP), returns a 0-100 score, findings by severity and category. Renders the score dashboard widget |
+| `plan_modernization` | plan | Staged plan for goal `patch_advisory`, `upgrade_runtime` or `modernize_all`. Some stages automated, others guided. Widget |
+| `preview_changes` | read | Read-only. File list and diff for one stage, plus `approvalToken` (guided stages return steps, not a diff) |
+| `apply_stage` | write | Verifies the token, applies the stage to a temp copy, re-scans it, returns patch plus projected score. Widget |
 
-## Working now
-- Secret redaction utility (`src/common/redact.ts`) with unit tests.
-- Server skeleton on the NitroStack SDK, builds and answers MCP requests.
-- Design docs in `docs/` and `ARCHITECTURE.md` (scope, tools, threat model, test plan).
+## Security model
+- Scopes are cumulative: `read` < `plan` < `write`. Every tool has a guard. Only `apply_stage` needs `write`
+- API keys: Bearer header, server stores only the SHA-256 hash, constant-time compare. 401 for missing/wrong key, 403 for low scope
+- Approval token: HMAC-SHA256, bound to plan hash + patch hash + stage, TTL 300s (default; max 900s allowed in code), secret from `METAMORPH_TOKEN_SECRET` (32+ chars). Changed patch, other stage, expired or forged token is refused
+- If the secret is not set, `apply_stage` refuses everything
+- Replay inside the TTL is accepted on purpose: apply is idempotent on the hashes and runs in a fresh temp dir. Single-use is not claimed
+- No repo code execution: the repo is fetched as an archive and only read and parsed. Nothing from it is installed, built or run
+- Sandbox: per-run temp dir, path containment, archive checks (zip-slip, size caps). The user's repo is never touched; the patch is returned for you to apply
+- Redaction: outputs and logs pass through `src/common/redact.ts`
+- Tool input schemas carry `.max()` limits on every string and array
+- Full analysis: `docs/THREAT_MODEL.md` (OWASP MCP Top 10 mapping), `SECURITY.md`
 
-## Planned tools (design, not built yet)
-- `assess_project`, `analyze_advisory`, `plan_modernization`, `preview_changes`, `apply_stage`, `verify_changes`, `score_mcp_design`, `generate_mcp_design`, `check_watch`.
+## Results (live deployed server, demo repo `dhilipa01/metamorph-demo-legacy`)
+- `php-shop`: score 17 before. Low because of known-vulnerable dependencies (fixed per-severity deductions: high 12, critical 25, medium 5, low 2)
+- `php-shop` after `apply_stage` `patch-dependencies`: projected 41 (+24). Fixes the `guzzlehttp/guzzle` and `symfony/http-kernel` advisories; this is a projection on the sandbox copy, not a change to your repo
+- `php-shop-modernized`: 100. The cleaned-up reference version has no findings, so nothing is deducted
+- `node-orders`: 43. Node sample with remaining findings; the per-finding breakdown is in the `assess_project` output
+- 391 unit tests pass
+- Scoring rule: start at 100, subtract a fixed weight per finding by severity, floor at 0
 
-## Run it locally
-- Needs Node 20 and npm.
+## Roadmap (designed, NOT built)
+- PHP to Node mapping
+- Cloud skeletons (AWS, Cloudflare, Kubernetes)
+- Build mode (idea or spec in, modern scaffold out)
+- CVE watch (`check_watch`)
+- Also only designed: `verify_changes`, `score_mcp_design`, `generate_mcp_design`
+- See `docs/PRD.md` and `ARCHITECTURE.md` for the designs
+
+## Run locally
+- Node 20 and npm
 - `npm install`
 - `npm run build`
-- `npm test`
-- `npm run dev` (MCP server plus widget server; connect NitroStack Studio to the project folder)
+- `npm test` (vitest)
+- `npm run dev` starts the MCP server plus the widget server. Ports 3001 and 3002 must be free
+- Copy `.env.example` to `.env`. For local calls without a key set `METAMORPH_AUTH=off` (local only, never on a host)
+- To test approvals set `METAMORPH_TOKEN_SECRET` (32+ chars) and a key: `METAMORPH_KEY_OWNER=write:<sha256 hex of your key>`
+- Never commit `.env`
 
-## Environment
-- Copy `.env.example` to `.env`. Variable names are listed there; never commit real values.
-- API keys for the hosted server are set as host environment variables (see `docs/SCHEMA.md`).
+## Connect
+- Transport: Streamable HTTP
+- URL: your deployment host plus `/mcp` (path must end with `/mcp`; `Cannot POST /` means it does not)
+- Auth: `Authorization: Bearer <your key>`. Use `<YOUR_API_KEY>` as the placeholder; keys are created by the operator and shown once
+- Studio: Add Server, Other Project, HTTP, paste URL, Bearer token
+- Health check: `GET /mcp/health` returns 200
 
 ## Docs
-- `ARCHITECTURE.md`, `docs/PRD.md`, `docs/TRD.md`, `docs/APP_FLOW.md`, `docs/DESIGN.md`, `docs/SCHEMA.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/THREAT_MODEL.md`, `docs/TEST_PLAN.md`.
+- `ARCHITECTURE.md`, `docs/PRD.md`, `docs/TRD.md`, `docs/APP_FLOW.md`, `docs/DESIGN.md`, `docs/SCHEMA.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/THREAT_MODEL.md`, `docs/TEST_PLAN.md`
+- `DEMO.md`: timed demo script
 
 ## License
-To be added before submission.
+To be added.
