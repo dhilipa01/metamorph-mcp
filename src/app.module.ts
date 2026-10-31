@@ -4,6 +4,7 @@ import { IntakeModule } from './modules/intake/intake.module.js';
 import { AssessmentModule } from './modules/assessment/assessment.module.js';
 import { PlanningModule } from './modules/planning/planning.module.js';
 import { FeedsModule } from './modules/feeds/feeds.module.js';
+import { ReportModule } from './modules/report/report.module.js';
 
 /**
  * Root Application Module
@@ -29,7 +30,8 @@ import { FeedsModule } from './modules/feeds/feeds.module.js';
     IntakeModule,
     AssessmentModule,
     PlanningModule,
-    FeedsModule
+    FeedsModule,
+    ReportModule
   ],
   providers: [
     // Health Checks
