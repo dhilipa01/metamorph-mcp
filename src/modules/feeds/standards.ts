@@ -70,7 +70,10 @@ const RULE_CWE: Record<string, string[]> = {
   'node-runtime-eol': ['CWE-1104'], // unmaintained component
   'php-version-eol': ['CWE-1104'],
   'docker-base-image-eol': ['CWE-1104'],
-  'node-deprecated-package': ['CWE-1104']
+  'node-deprecated-package': ['CWE-1104'],
+  'hardcoded-secret-in-source': ['CWE-798'], // use of hard-coded credentials
+  'ci-pr-target-checkout': ['CWE-829'], // code from an untrusted source (PR head) runs in a privileged workflow
+  'ci-action-unpinned-branch': ['CWE-829'] // action code taken from a branch that can change
 };
 
 export function cweForRule(ruleId: string): string[] {

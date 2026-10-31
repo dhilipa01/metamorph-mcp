@@ -100,7 +100,7 @@ export async function collectReportData(
       const a = await projectAutomatedStages(dir, f, p, assess);
       return { full: f, plan: p, apply: a, commit: repo.commit };
     },
-    { fetchFn: deps.archiveFetch }
+    { fetchFn: deps.archiveFetch, requireProjectRoot: true }
   );
   const ref = refOf(input.repo_url);
   const data = buildReportData({

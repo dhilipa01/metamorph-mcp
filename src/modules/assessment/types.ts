@@ -17,6 +17,11 @@ export interface Finding {
   epss?: number; // EPSS probability 0..1
   source?: string; // where the enrichment came from, e.g. "osv.dev"
   rankReason?: string; // why it sits where it does in the ranking (rank.ts), max 80 chars; set by assessFull
+  // 'low': the finding rests on a guessed version (dependency range, no lockfile). The score counts it at half weight (score.ts).
+  confidence?: 'low';
+  // Folder (relative to the repository root) of the project the finding belongs to. Set only when more than one
+  // project was assessed or the root has no manifest; absent for repo-wide findings and for single-project runs.
+  project?: string;
 }
 
 export interface DepRef {

@@ -70,7 +70,7 @@ export class VerifyTools {
       repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
       note: parsed.ref ? `The runner clones the default branch of the repository, not "${parsed.ref}". Make sure they match before trusting the result.` : undefined,
       subfolder: input.subfolder,
-      getPatch: () => withRepo(repo_url, input.subfolder, ctx, (dir) => patchForStage(dir, { stage, token: approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }))
+      getPatch: () => withRepo(repo_url, input.subfolder, ctx, (dir) => patchForStage(dir, { stage, token: approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }), { requireProjectRoot: true })
     });
   }
 }

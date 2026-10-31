@@ -4,6 +4,7 @@
 // A trial is one planted problem in its own small project, so one trial can never hide behind another.
 // Rules that miss a planted problem are NOT loosened here: the trial is listed in KNOWN_GAPS (also in docs/EVAL_RESULTS.md),
 // runs as `it.fails` and starts failing the moment the gap is fixed, which forces the entry to be removed.
+// KNOWN_GAPS is currently empty: the four gaps measured in the first run are fixed and their trials are ordinary tests.
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -85,6 +86,7 @@ const SMELLS: Array<[string, string, string]> = [
   ['php-mysql-removed-api', 'mysql_connect', "$c = mysql_connect('localhost', 'u', 'p');"],
   ['php-mysql-removed-api', 'mysql_query with variable', '$r = mysql_query($sql);'],
   ['php-mysql-removed-api', 'error-suppressed mysql_fetch_assoc', '$row = @mysql_fetch_assoc($r);'],
+  ['php-mysql-removed-api', 'definition and call on one line', 'function mysql_wrap($q) { return mysql_query($q); }'],
   ['php-sql-concatenation', 'mysql_query + $_GET', "$r = mysql_query(\"SELECT * FROM t WHERE id = \" . $_GET['id']);"],
   ['php-sql-concatenation', 'PDO query + $_POST', "$rows = $pdo->query(\"SELECT * FROM t WHERE n = '\" . $_POST['n'] . \"'\");"],
   ['php-sql-concatenation', 'mysqli_query + $_REQUEST', 'mysqli_query($db, "DELETE FROM t WHERE id = $_REQUEST[id]");'],
@@ -95,6 +97,7 @@ const SMELLS: Array<[string, string, string]> = [
   ['php-weak-password-hash', 'md5 of $_POST[password]', "$h = md5($_POST['password']);"],
   ['php-weak-password-hash', 'sha1 of $password . $salt', '$h = sha1($password . $salt);'],
   ['php-weak-password-hash', 'md5 of $_POST[pwd] (name has no "pass")', "$hash = md5($_POST['pwd']);"],
+  ['php-weak-password-hash', 'sha1 of $pw', '$hash = sha1($pw . $salt);'],
   ['php-unserialize-input', 'unserialize($_COOKIE)', "$cart = unserialize($_COOKIE['cart']);"],
   ['php-unserialize-input', 'unserialize(stripslashes($_POST))', "$d = unserialize(stripslashes($_POST['data']));"],
   ['php-dynamic-include', 'include($_GET[page])', "include($_GET['page'] . '.php');"],
@@ -157,29 +160,31 @@ depTrial('guzzlehttp/guzzle 6.5.0 (composer.lock)', 'guzzlehttp/guzzle', { ...MO
 depTrial('symfony/http-kernel 4.4.0 (lock, v prefix)', 'symfony/http-kernel', { ...MODERN_PHP, 'composer.json': composerJson({ php: '^8.4', 'symfony/http-kernel': '^4.4' }), 'composer.lock': composerLock([['symfony/http-kernel', 'v4.4.0']]) }, '4.4.50');
 depTrial('phpmailer/phpmailer 5.2.0 (exact pin, no lock)', 'phpmailer/phpmailer', { ...without(MODERN_PHP, 'composer.lock'), 'composer.json': composerJson({ php: '^8.4', 'phpmailer/phpmailer': '5.2.0' }) }, '5.2.27');
 
-// Rules we do not have. They are planted anyway so the table shows 0 of N instead of staying silent.
-const NOT_IMPLEMENTED = ['hardcoded-secret-in-source', 'ci-risky-workflow'];
-plant('hardcoded-secret-in-source', 'AWS-style access key in a PHP file', { ...MODERN_PHP, ...phpFile("$key = 'AKIAIOSFODNN7EXAMPLE';") }, 'src/legacy.php');
-plant('hardcoded-secret-in-source', 'private key literal in a JS file', { ...MODERN_NODE, 'src/deploy.js': "const k = '-----BEGIN RSA PRIVATE KEY-----MIIBOgIBAAJB';\n" }, 'src/deploy.js');
-plant('ci-risky-workflow', 'pull_request_target checking out the PR head', { ...MODERN_NODE, '.github/workflows/ci.yml': 'name: CI\non: pull_request_target\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n      - run: npm test\n' }, 'ci.yml');
-plant('ci-risky-workflow', 'third-party action on a moving branch', { ...MODERN_NODE, '.github/workflows/ci.yml': 'name: CI\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: some-org/deploy-action@master\n' }, 'ci.yml');
+// Secrets in source. The keys are built from parts so that this test file does not itself contain a key-shaped string.
+const AWS_KEY = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+const GH_TOKEN = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789';
+const PEM = '-----BEGIN RSA ' + 'PRIVATE KEY-----';
+plant('hardcoded-secret-in-source', 'AWS access key id in a PHP file', { ...MODERN_PHP, ...phpFile(`$key = '${AWS_KEY}';`) }, 'src/legacy.php:3 (AWS access key id)');
+plant('hardcoded-secret-in-source', 'private key block in a JS file', { ...MODERN_NODE, 'src/deploy.js': `const k = '${PEM}MIIBOgIBAAJB';\n` }, 'src/deploy.js:1 (private key block)');
+plant('hardcoded-secret-in-source', 'GitHub token in a YAML config', { ...MODERN_NODE, 'config/deploy.yml': `name: x\ntoken: ${GH_TOKEN}\n` }, 'config/deploy.yml:2 (GitHub token)');
+plant('hardcoded-secret-in-source', 'committed .pem file', { ...MODERN_NODE, 'certs/server.pem': `${PEM}\nMIIB\n-----END RSA PRIVATE KEY-----\n` }, 'certs/server.pem:1 (private key block)');
+
+// Risky GitHub Actions workflows
+const wf = (on: string, steps: string) => ({ '.github/workflows/ci.yml': `name: CI\non: ${on}\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n${steps}` });
+plant('ci-pr-target-checkout', 'pull_request_target checking out the PR head sha', { ...MODERN_NODE, ...wf('pull_request_target', '      - uses: actions/checkout@v4\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n      - run: npm test\n') }, 'ci.yml:9');
+plant('ci-pr-target-checkout', 'pull_request_target checking out the PR head repository', { ...MODERN_NODE, ...wf('[pull_request_target]', '      - uses: actions/checkout@v4\n        with:\n          repository: ${{ github.event.pull_request.head.repo.full_name }}\n') }, 'ci.yml:9');
+plant('ci-action-unpinned-branch', 'third-party action on @master', { ...MODERN_NODE, ...wf('[push]', '      - uses: some-org/deploy-action@master\n') }, 'ci.yml:7 (some-org/deploy-action@master)');
+plant('ci-action-unpinned-branch', 'official action on @main', { ...MODERN_NODE, ...wf('[push]', '      - uses: actions/checkout@v4\n      - uses: actions/setup-node@main\n') }, 'ci.yml:8 (actions/setup-node@main)');
 
 // ---------- known gaps (also listed in docs/EVAL_RESULTS.md) ----------
 // A trial named here runs with it.fails: the detector is expected to miss it. When it starts to detect, the test fails and
 // the entry must be removed from this map and from the docs.
-const KNOWN_GAPS = new Map<string, string>([
-  ['php-weak-password-hash: md5 of $_POST[pwd] (name has no "pass")', 'the rule only fires when the line also contains the text "pass"']
-]);
-for (const t of trials) if (NOT_IMPLEMENTED.includes(t.rule)) KNOWN_GAPS.set(`${t.rule}: ${t.name}`, 'no such rule exists yet');
+const KNOWN_GAPS = new Map<string, string>();
 
 // ---------- detection ----------
 function detected(t: Trial, findings: Finding[], fixes: Array<{ name: string; to: string }>): boolean {
   if (t.rule === 'dep-vulnerable') {
     return findings.some((f) => f.id === `dep-vulnerable:${t.dep!.name}`) && fixes.some((x) => x.name === t.dep!.name && x.to === t.dep!.to);
-  }
-  if (NOT_IMPLEMENTED.includes(t.rule)) {
-    // no rule id to look for: any finding that points at the planted file counts
-    return findings.some((f) => (f.evidence ?? '').includes(t.evidence!));
   }
   return findings.some((f) => f.id === t.rule && (t.evidence === undefined || (f.evidence ?? '').includes(t.evidence)));
 }
@@ -244,6 +249,16 @@ const cleanFixtures: Array<[string, () => Promise<Files>]> = [
       "    $hash = password_hash($_POST['password'] ?? '', PASSWORD_DEFAULT);\n    $cfg = unserialize(file_get_contents(__DIR__ . '/cfg.ser'));\n" +
       "    $rows = $pdo->query('SELECT 1')->fetchAll();\n    include __DIR__ . '/view.php';\n    return $rows;\n  }\n}\n"
   })],
+  ['PHP 8.4 hashes that are not passwords (md5_file, cache keys, sha1 of a file)', async () => ({
+    ...MODERN_PHP,
+    'src/Hashes.php': "<?php\ndeclare(strict_types=1);\nfinal class Hashes {\n  public function etag(string $path): string { return md5_file($path); }\n  public function key(string $name): string { return sha1($name . '/v2'); }\n  public function sum(): string { return md5(json_encode([1, 2])); }\n}\n"
+  })],
+  ['secrets and CI lookalikes: AWS documentation key, key-shaped words in docs, safe workflows', async () => ({
+    ...MODERN_NODE,
+    'src/example.js': "// AWS docs use AKIAIOSFODNN7EXAMPLE and AKIAI44QH8DHBEXAMPLE as sample ids\nconst sample = 'AKIAIOSFODNN7EXAMPLE';\nconst word = 'AKIA'; // too short to be a key\nconst t = 'ghp_short';\n",
+    'README.md': `Never commit a key like ${AWS_KEY} or a ${PEM} block.\n`,
+    '.github/workflows/ci.yml': 'name: CI\non:\n  pull_request_target:\n    types: [labeled]\njobs:\n  label:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9\n      - uses: ./.github/actions/local\n      # - uses: some-org/old-action@master\n      - uses: docker://alpine:3.20\n'
+  })],
   ['PHP 8.4 class that defines a method named like a removed function', async () => ({
     ...MODERN_PHP,
     'src/Compat.php': "<?php\ndeclare(strict_types=1);\nfinal class Compat {\n  public function mysql_query_count(): int { return 0; }\n}\n"
@@ -261,9 +276,8 @@ const cleanFixtures: Array<[string, () => Promise<Files>]> = [
   })]
 ];
 // Clean fixtures on which the assessor is known to report something. They run as it.fails and are listed in docs/EVAL_RESULTS.md.
-const KNOWN_FALSE_POSITIVES = new Map<string, string>([
-  ['PHP 8.4 class that defines a method named like a removed function', 'php-mysql-removed-api matches `function mysql_query_count(` (a definition, not a call)']
-]);
+// Empty since the method-definition false positive was fixed.
+const KNOWN_FALSE_POSITIVES = new Map<string, string>();
 const fpRows: Array<{ fixture: string; findings: string[] }> = [];
 
 describe('ground truth: clean fixtures produce zero findings', () => {
@@ -282,6 +296,24 @@ describe('ground truth: clean fixtures produce zero findings', () => {
     const full = await run({ ...MODERN_NODE, 'package.json': pkgJson({ dependencies: { lodash: '^4.17.21', minimist: '^1.2.6' } }), 'package-lock.json': lockOf({ lodash: '4.17.21', minimist: '1.2.6' }) });
     expect(full.findings.filter((f) => f.id.startsWith('dep-vulnerable'))).toEqual([]);
     expect(full.fixes).toEqual([]);
+  });
+});
+
+describe('ground truth: secrets are reported by type and place, never by value', () => {
+  it('no secret text appears anywhere in the assessment result', async () => {
+    const full = await run({ ...MODERN_PHP, ...phpFile(`$key = '${AWS_KEY}'; $t = '${GH_TOKEN}';`), 'k.js': `const k = '${PEM}MIIBsecretbody';\n` });
+    const text = JSON.stringify(full);
+    for (const secret of [AWS_KEY, GH_TOKEN, 'MIIBsecretbody']) expect(text).not.toContain(secret);
+    const f = full.findings.find((x) => x.id === 'hardcoded-secret-in-source')!;
+    expect(f.cwe).toEqual(['CWE-798']);
+    expect(f.owasp).toEqual(['A07:2021']);
+  });
+
+  it('maps the CI rules to CWE-829 and nothing the rule does not show', async () => {
+    const full = await run({ ...MODERN_NODE, ...wf('[push]', '      - uses: some-org/deploy-action@master\n') });
+    const f = full.findings.find((x) => x.id === 'ci-action-unpinned-branch')!;
+    expect(f.cwe).toEqual(['CWE-829']);
+    expect(f.owasp).toEqual(['A08:2021']);
   });
 });
 

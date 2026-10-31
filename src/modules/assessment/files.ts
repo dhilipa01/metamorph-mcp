@@ -7,6 +7,10 @@ export interface KeyFiles {
   paths: string[];
   contents: Record<string, string>;
   php: Array<{ path: string; content: string }>;
+  // Source and config text files (other than the key files and PHP) kept only for the secrets scan; never returned to callers.
+  scan: Array<{ path: string; content: string }>;
+  // GitHub Actions workflow files (.github/workflows/*.yml|yaml), for the risky-CI rules.
+  workflows: Array<{ path: string; content: string }>;
   truncated: boolean;
 }
 
@@ -38,7 +42,19 @@ export const KEY_FILES: readonly string[] = [
 
 // Lockfiles whose presence matters but whose (large) content is never stored.
 const PRESENCE_ONLY = new Set(['yarn.lock', 'pnpm-lock.yaml']);
-const SKIP_DIRS = new Set(['node_modules', 'vendor', '.git', 'dist', 'build', '.next', '__pycache__']);
+// Directories never read at all. Each is skipped for a stated reason (docs/EVAL_RESULTS.md section 4 lists them too):
+//  third-party code    node_modules, vendor, bower_components: not the project's own code; their manifests and PHP would
+//                      otherwise be assessed as if the team wrote them
+//  VCS and build output .git, dist, build, .next, __pycache__: generated or tool-owned
+//  test fixtures       fixtures, fixture, __fixtures__, testdata: sample projects that deliberately contain old, vulnerable or
+//                      secret-looking content to test tools; assessing them as the project produces false findings
+export const SKIP_DIRS = new Set(['node_modules', 'vendor', 'bower_components', '.git', 'dist', 'build', '.next', '__pycache__', 'fixtures', 'fixture', '__fixtures__', 'testdata']);
+
+// Extensions whose text is scanned for hard-coded credentials. Documentation (.md, .txt) is deliberately left out: it is
+// where example keys are written on purpose. Lockfiles and minified bundles are left out as generated.
+const SCAN_EXT = /\.(?:m?[jt]sx?|cjs|py|rb|go|java|kt|cs|sh|bash|ya?ml|toml|ini|cfg|conf|properties|json|xml|pem|key)$/i;
+const SCAN_SKIP_NAME = /(?:^|[.-])min\.(?:js|css)$|^package-lock\.json$|^npm-shrinkwrap\.json$|^composer\.lock$/i;
+const WORKFLOW = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 
 export interface ReadLimits {
   maxFiles: number;
@@ -46,6 +62,9 @@ export interface ReadLimits {
   maxFileBytes: number;
   maxPhpFiles: number;
   maxPhpBytes: number;
+  maxScanFiles: number;
+  maxScanFileBytes: number;
+  maxScanTotalBytes: number;
 }
 
 export const DEFAULT_READ_LIMITS: ReadLimits = {
@@ -53,7 +72,10 @@ export const DEFAULT_READ_LIMITS: ReadLimits = {
   maxDepth: 12,
   maxFileBytes: 256 * 1024,
   maxPhpFiles: 200,
-  maxPhpBytes: 200 * 1024
+  maxPhpBytes: 200 * 1024,
+  maxScanFiles: 400,
+  maxScanFileBytes: 128 * 1024,
+  maxScanTotalBytes: 8 * 1024 * 1024
 };
 
 // Opens without following symlinks; returns null when unreadable, or when skipLarge is set and the file is over the limit.
@@ -96,7 +118,8 @@ export async function readKeyFiles(dir: string, limits?: Partial<ReadLimits>): P
   }
   if (!rootStat.isDirectory()) throw new Error(`Not a directory: ${dir}`);
 
-  const result: KeyFiles = { paths: [], contents: {}, php: [], truncated: false };
+  const result: KeyFiles = { paths: [], contents: {}, php: [], scan: [], workflows: [], truncated: false };
+  let scanBytes = 0;
   const queue: Array<{ rel: string; depth: number }> = [{ rel: '', depth: 0 }];
 
   for (let i = 0; i < queue.length; i++) {
@@ -139,6 +162,15 @@ export async function readKeyFiles(dir: string, limits?: Partial<ReadLimits>): P
       } else if (name.endsWith('.php') && result.php.length < lim.maxPhpFiles) {
         const text = await readBounded(abs, lim.maxPhpBytes, false);
         if (text !== null) result.php.push({ path: childRel, content: text });
+      } else if (WORKFLOW.test(childRel) && result.workflows.length < 50) {
+        const text = await readBounded(abs, lim.maxFileBytes, true);
+        if (text !== null) result.workflows.push({ path: childRel, content: text });
+      } else if (SCAN_EXT.test(name) && !SCAN_SKIP_NAME.test(name) && !/^\.env/.test(name) && result.scan.length < lim.maxScanFiles && scanBytes < lim.maxScanTotalBytes) {
+        const text = await readBounded(abs, lim.maxScanFileBytes, true);
+        if (text !== null) {
+          scanBytes += text.length;
+          result.scan.push({ path: childRel, content: text });
+        }
       }
     }
   }

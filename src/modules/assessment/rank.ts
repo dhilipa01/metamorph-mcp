@@ -10,6 +10,7 @@ export function compareFindings(a: Finding, b: Finding): number {
   return (
     Number(b.kev === true) - Number(a.kev === true) ||
     SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+    Number(a.confidence === 'low') - Number(b.confidence === 'low') || // at equal severity, certain findings before guessed-version ones
     (b.epss ?? -1) - (a.epss ?? -1) ||
     a.category.localeCompare(b.category) ||
     a.id.localeCompare(b.id) ||
@@ -23,6 +24,7 @@ export function rankReason(f: Finding): string {
   if (f.kev === true) parts.push('listed as known exploited by CISA');
   parts.push(`severity ${f.severity}`);
   if (typeof f.epss === 'number' && Number.isFinite(f.epss)) parts.push(`EPSS ${f.epss.toFixed(2)}`);
+  if (f.confidence === 'low') parts.push('version range, no lockfile');
   return parts.join(', ').slice(0, MAX_RANK_REASON);
 }
 
