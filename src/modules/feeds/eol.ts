@@ -4,8 +4,12 @@ import { fetchJson, FeedError, TtlCache, SIX_HOURS_MS, type FetchOptions } from 
 
 export const EOL_BASE = 'https://endoflife.date/api';
 // Product slugs are never taken from the caller verbatim; they must be on this list.
-export const EOL_PRODUCTS: readonly string[] = ['php', 'nodejs', 'laravel', 'symfony', 'python', 'ruby'];
-const CYCLE_RE = /^[0-9][0-9A-Za-z.-]{0,15}$/;
+export const EOL_PRODUCTS: readonly string[] = ['php', 'nodejs', 'laravel', 'symfony', 'python', 'ruby',
+  // Cloud connector (src/modules/cloud): AWS runtimes and managed engines.
+  'aws-lambda', 'amazon-eks', 'amazon-rds-mysql', 'amazon-rds-postgresql', 'amazon-rds-mariadb', 'amazon-linux'
+];
+// Cycles are release lines such as "8.1", "2018.03" or, for aws-lambda, runtime ids such as "nodejs20.x" or "java8.al2".
+const CYCLE_RE = /^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$/;
 
 export interface EolCycle {
   product: string;
@@ -13,6 +17,9 @@ export interface EolCycle {
   eol: string | boolean; // ISO date, or false while still supported
   isEol: boolean;
   latest: string;
+  // End of standard support / deprecation as some products define it (endoflife.date "support"); for aws-lambda this is the
+  // runtime deprecation date, while "eol" is when function updates are blocked. Absent when the feed has none.
+  support?: string;
   source: string;
   fetchedAt: string;
 }
@@ -42,7 +49,8 @@ export function parseEol(product: string, data: unknown, nowMs: number, fetchedA
       eol = r.eol;
       isEol = r.eol;
     } else continue;
-    out.push({ product, cycle, eol, isEol, latest: cleanText(r.latest, 32), source, fetchedAt });
+    const support = typeof r.support === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.support) ? r.support : undefined;
+    out.push({ product, cycle, eol, isEol, latest: cleanText(r.latest, 32), ...(support ? { support } : {}), source, fetchedAt });
   }
   return out;
 }
