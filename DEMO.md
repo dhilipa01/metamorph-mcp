@@ -9,6 +9,7 @@ Total: 15 + 35 + 40 + 40 + 20 + 20 = 170s (2:50). Repo: `https://github.com/dhil
 - [ ] Host has `METAMORPH_TOKEN_SECRET` set (else preview returns no token and apply refuses)
 - [ ] Ports 3001 and 3002 free if using local: `ss -ltnp | grep -E ":(3001|3002)"`
 - [ ] Studio launched (`nitrostudio`), signed in with API key, remote server added: HTTP, URL ends `/mcp`, Bearer token
+- [ ] For a `generate_report` beat: `METAMORPH_TOKEN_SECRET` and `METAMORPH_PUBLIC_URL` (the deployed URL) are set, so the PDF, SARIF and SBOM links are clickable; links last 10 minutes and there is no format option, all three are always made
 - [ ] Dry run the full sequence once; the approval token lives only 300s, so do preview and apply back to back
 - [ ] Widgets render in Studio (not yet verified at time of writing): check assess, plan and apply
 - [ ] Notifications off, window large, font readable, no key or secret visible

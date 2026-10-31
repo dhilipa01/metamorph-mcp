@@ -9,13 +9,15 @@ import { renderSbom } from './sbom.js';
 export type ReportFormat = 'pdf' | 'sarif' | 'sbom';
 export const FORMATS: readonly ReportFormat[] = ['pdf', 'sarif', 'sbom'];
 
-// Embed content in the tool result only below this size: MCP payloads are JSON (base64 adds about 33%) and clients
-// struggle with big ones. Above it the caller gets the summary and a resource link.
+// Hard ceiling for embedding any file in the tool result (MCP payloads are JSON, base64 adds about 33%).
 export const EMBED_LIMIT_BYTES = 1024 * 1024;
+// A widget tool's result is also its structuredContent AND the text the model reads, so inline copies are stricter:
+// only as a fallback when no absolute download link exists, per file below 256 KB.
+export const INLINE_LIMIT_BYTES = Math.min(EMBED_LIMIT_BYTES, 256 * 1024);
 export const CACHE_MAX_ENTRIES = 5;
 export const CACHE_TTL_MS = 10 * 60 * 1000;
 
-const SUFFIX: Record<ReportFormat, string> = { pdf: 'pdf', sarif: 'sarif', sbom: 'cdx.json' };
+export const SUFFIX: Record<ReportFormat, string> = { pdf: 'pdf', sarif: 'sarif', sbom: 'cdx.json' };
 export const MIME: Record<ReportFormat, string> = { pdf: 'application/pdf', sarif: 'application/sarif+json', sbom: 'application/vnd.cyclonedx+json' };
 export const URI_PREFIX = 'metamorph://report/';
 
@@ -80,31 +82,42 @@ export function lookupResource(uri: string, cache: ReportCache = reportCache): A
   return undefined;
 }
 
+export interface ReportFile {
+  format: ReportFormat;
+  label: string;
+  fileName: string;
+  bytes: number;
+  mimeType: string;
+  uri: string; // metamorph:// resource, readable for 10 minutes
+  downloadUrl?: string; // absolute signed link (needs METAMORPH_PUBLIC_URL)
+  downloadPath?: string; // signed path on this server, when no public URL is configured
+  inline?: { encoding: 'base64' | 'utf8'; data: string }; // fallback only: no absolute link and file below INLINE_LIMIT_BYTES
+}
+
 export interface ReportSummary {
   reportId: string;
   score: { overall: number; origin: 'measured' };
   findings: { total: number; critical: number; high: number; medium: number; low: number; info: number };
-  pages?: number;
-  formats: Array<{ format: ReportFormat; bytes: number; mimeType: string; uri: string; embedded: boolean }>;
+  topFindings: Array<{ severity: string; title: string }>;
+  pages: number;
+  files: ReportFile[];
+  expiresInMinutes: number;
   message: string;
 }
 
-export type ToolContent =
-  | { type: 'text'; text: string }
-  | { type: 'resource'; resource: { uri: string; mimeType: string; text?: string; blob?: string } }
-  | { type: 'resource_link'; uri: string; name: string; mimeType: string; description?: string };
-
-export interface ReportToolResult {
-  content: ToolContent[];
-  structuredContent: ReportSummary;
+// How to link to a file: undefined when this server cannot issue links (no HTTP transport or no secret).
+export interface LinkProvider {
+  link(id: string, ext: string): { url?: string; path: string } | undefined;
+  hint: string; // one sentence on why links are missing or relative
 }
 
-export async function generateReport(data: ReportData, formats: ReportFormat[] = ['pdf'], cache: ReportCache = reportCache): Promise<ReportToolResult> {
-  const wanted = FORMATS.filter((f) => formats.includes(f));
-  if (wanted.length === 0) throw new Error('No valid format requested. Use pdf, sarif or sbom.');
+const LABEL: Record<ReportFormat, string> = { pdf: 'PDF report', sarif: 'SARIF 2.1.0 findings', sbom: 'CycloneDX 1.5 SBOM' };
+
+// Always renders all three formats; there is no format option.
+export async function generateReport(data: ReportData, links?: LinkProvider, cache: ReportCache = reportCache): Promise<ReportSummary> {
   const artifacts: Artifact[] = [];
-  let pages: number | undefined;
-  for (const format of wanted) {
+  let pages = 0;
+  for (const format of FORMATS) {
     if (format === 'pdf') {
       const r = await renderPdf(data);
       pages = r.pages;
@@ -120,25 +133,45 @@ export async function generateReport(data: ReportData, formats: ReportFormat[] =
   cache.put(reportId, artifacts);
 
   const counts = Object.fromEntries(data.counts.map((c) => [c.severity, c.count.value])) as Record<string, number>;
-  const content: ToolContent[] = [];
-  const formatsOut: ReportSummary['formats'] = [];
-  const oversized: string[] = [];
-  for (const a of artifacts) {
-    const uri = reportUri(reportId, a.format);
-    const embedded = a.data.length < EMBED_LIMIT_BYTES;
-    formatsOut.push({ format: a.format, bytes: a.data.length, mimeType: a.mimeType, uri, embedded });
-    if (embedded) {
-      content.push({ type: 'resource', resource: { uri, mimeType: a.mimeType, ...(a.format === 'pdf' ? { blob: a.data.toString('base64') } : { text: a.data.toString('utf8') }) } });
-    } else {
-      oversized.push(a.format);
-      content.push({ type: 'resource_link', uri, name: `metamorph-report.${SUFFIX[a.format]}`, mimeType: a.mimeType, description: 'Too large to embed; read this resource within 10 minutes.' });
+  let absolute = true;
+  let anyLink = false;
+  const files: ReportFile[] = artifacts.map((a) => {
+    const ext = SUFFIX[a.format];
+    const l = links?.link(reportId, ext);
+    const file: ReportFile = {
+      format: a.format,
+      label: LABEL[a.format],
+      fileName: `metamorph-report-${reportId.slice(0, 8)}.${ext}`,
+      bytes: a.data.length,
+      mimeType: a.mimeType,
+      uri: reportUri(reportId, a.format)
+    };
+    if (l) {
+      anyLink = true;
+      if (l.url) file.downloadUrl = l.url;
+      else {
+        file.downloadPath = l.path;
+        absolute = false;
+      }
+    } else absolute = false;
+    return file;
+  });
+  if (!absolute) {
+    // No clickable link: put small files inline so the user can still save them (see INLINE_LIMIT_BYTES).
+    for (const f of files) {
+      const a = artifacts.find((x) => x.format === f.format) as Artifact;
+      if (a.data.length < INLINE_LIMIT_BYTES) f.inline = a.format === 'pdf' ? { encoding: 'base64', data: a.data.toString('base64') } : { encoding: 'utf8', data: a.data.toString('utf8') };
     }
   }
-  const message =
-    oversized.length > 0
-      ? `${oversized.join(', ')} exceeded ${EMBED_LIMIT_BYTES / 1024 / 1024} MB and is not embedded. Read it through the resource link (kept in memory for 10 minutes).`
-      : `All requested formats are embedded. They are also readable as resources for 10 minutes.`;
-  const summary: ReportSummary = {
+  const lines = files.map((f) => `${f.label} (${Math.round(f.bytes / 1024)} KB): ${f.downloadUrl ?? f.downloadPath ?? f.uri}`);
+  const message = [
+    absolute ? 'Download links (valid 10 minutes):' : anyLink ? `Links are relative paths on the server. ${links?.hint ?? ''}` : (links?.hint ?? 'Download links are not available on this server.'),
+    ...lines,
+    absolute ? '' : 'The files are also readable as MCP resources for 10 minutes' + (files.some((f) => f.inline) ? ', and small files are included inline in this result.' : '.')
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return {
     reportId,
     score: { overall: data.score.value, origin: 'measured' },
     findings: {
@@ -149,10 +182,10 @@ export async function generateReport(data: ReportData, formats: ReportFormat[] =
       low: counts.low ?? 0,
       info: counts.info ?? 0
     },
-    ...(pages !== undefined ? { pages } : {}),
-    formats: formatsOut,
+    topFindings: data.findings.slice(0, 3).map((f) => ({ severity: f.severity, title: f.title })),
+    pages,
+    files,
+    expiresInMinutes: CACHE_TTL_MS / 60000,
     message
   };
-  content.unshift({ type: 'text', text: JSON.stringify(summary, null, 2) });
-  return { content, structuredContent: summary };
 }

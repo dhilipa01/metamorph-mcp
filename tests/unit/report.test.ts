@@ -4,12 +4,15 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_PAGES, MAX_PDF_BYTES, NO_RUNNER_SENTENCE, PAGE_MARGIN, renderPdf, safeText } from '../../src/modules/report/pdf.js';
-import { ReportCache, generateReport, lookupResource, reportUri } from '../../src/modules/report/report.js';
+import { INLINE_LIMIT_BYTES, ReportCache, generateReport, lookupResource, reportUri } from '../../src/modules/report/report.js';
+import { linkProvider } from '../../src/modules/report/links.js';
 import { buildReportData, cleanText, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
 import { buildSarif, locationOf } from '../../src/modules/report/sarif.js';
 import { buildSbom, purlOf } from '../../src/modules/report/sbom.js';
 import { FIXTURES, NOW, dataOf, fullOf, manyFindings, phpShopReportData } from '../helpers/report-fixtures.js';
 
+
+const SECRET = 'test-secret-test-secret-test-secret-123';
 
 // ---- poppler helpers (layout checks run only when installed) ----
 const have = (cmd: string) => spawnSync(cmd, ['-v'], { encoding: 'utf8' }).error === undefined;
@@ -279,31 +282,56 @@ describe('cache and tool result', () => {
     expect(c.size).toBe(0);
   });
 
-  it('embeds pdf as base64 blob and sarif/sbom as text, and serves them as resources', async () => {
+  it('always produces pdf, sarif and sbom, with signed absolute links and no inline copies', async () => {
     const cache = new ReportCache();
-    const res = await generateReport(dataOf(manyFindings(5), { deps: [{ ecosystem: 'npm', name: 'a', version: '1.0.0', dev: false, approximate: false }] }), ['pdf', 'sarif', 'sbom'], cache);
-    const resources = res.content.filter((c) => c.type === 'resource');
-    expect(resources).toHaveLength(3);
-    const pdf = res.content.find((c) => c.type === 'resource' && c.resource.mimeType === 'application/pdf');
-    expect(pdf && pdf.type === 'resource' && Buffer.from(pdf.resource.blob ?? '', 'base64').subarray(0, 5).toString()).toBe('%PDF-');
-    const sarif = res.content.find((c) => c.type === 'resource' && c.resource.mimeType.includes('sarif'));
-    expect(sarif && sarif.type === 'resource' && JSON.parse(sarif.resource.text ?? '{}').version).toBe('2.1.0');
-    expect(res.structuredContent.pages).toBeGreaterThan(0);
-    const id = res.structuredContent.reportId;
+    const links = linkProvider({ secret: SECRET, publicUrl: 'https://metamorph.example.com/', routesActive: true });
+    const res = await generateReport(dataOf(manyFindings(5), { deps: [{ ecosystem: 'npm', name: 'a', version: '1.0.0', dev: false, approximate: false }] }), links, cache);
+    expect(res.files.map((f) => f.format)).toEqual(['pdf', 'sarif', 'sbom']);
+    expect(res.pages).toBeGreaterThan(0);
+    expect(res).not.toHaveProperty('formats');
+    for (const f of res.files) {
+      expect(f.downloadUrl).toMatch(new RegExp(`^https://metamorph\\.example\\.com/reports/${res.reportId}\\.[a-z.]+\\?t=`));
+      expect(f.inline).toBeUndefined();
+    }
+    expect(res.message).toContain('Download links');
+    expect(res.message).toContain(res.files[0].downloadUrl as string);
+    expect(res.topFindings.length).toBeGreaterThan(0);
+    expect(JSON.stringify(res)).not.toContain('JVBERi'); // no base64 PDF when links work
+    const id = res.reportId;
     expect(lookupResource(reportUri(id, 'pdf'), cache)?.data.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(JSON.parse(lookupResource(reportUri(id, 'sarif'), cache)?.data.toString('utf8') ?? '{}').version).toBe('2.1.0');
     expect(lookupResource(reportUri(id, 'sbom'), cache)?.mimeType).toContain('cyclonedx');
     expect(lookupResource('metamorph://report/../../etc/passwd.pdf', cache)).toBeUndefined();
   }, 30_000);
 
-  it('returns a resource link and a message instead of content above 1 MB', async () => {
+  it('gives relative paths when METAMORPH_PUBLIC_URL is unset and says how to fix it, with small files inline', async () => {
     const cache = new ReportCache();
+    const links = linkProvider({ secret: SECRET, routesActive: true });
+    const res = await generateReport(dataOf(manyFindings(2)), links, cache);
+    for (const f of res.files) {
+      expect(f.downloadUrl).toBeUndefined();
+      expect(f.downloadPath).toMatch(/^\/reports\/[a-f0-9]{24}\.[a-z.]+\?t=/);
+      if (f.bytes < INLINE_LIMIT_BYTES) expect(f.inline).toBeDefined();
+    }
+    expect(res.message).toContain('METAMORPH_PUBLIC_URL');
+    const pdf = res.files.find((f) => f.format === 'pdf')?.inline;
+    if (pdf) expect(Buffer.from(pdf.data, 'base64').subarray(0, 5).toString()).toBe('%PDF-');
+  }, 30_000);
+
+  it('without HTTP routes there are no links, a reason, and resource URIs', async () => {
+    const res = await generateReport(dataOf(manyFindings(2)), linkProvider({ secret: SECRET, routesActive: false }), new ReportCache());
+    expect(res.files.every((f) => !f.downloadUrl && !f.downloadPath && f.uri.startsWith('metamorph://report/'))).toBe(true);
+    expect(res.message).toContain('HTTP transport');
+  }, 30_000);
+
+  it('never inlines a file at or above the inline limit', async () => {
     const deps = Array.from({ length: 6000 }, (_, i) => ({ ecosystem: 'npm' as const, name: `package-with-a-long-name-${i}`, version: `1.${i}.0`, dev: false, approximate: false }));
-    const res = await generateReport(dataOf([], { deps }), ['sbom'], cache);
-    expect(res.structuredContent.formats[0].embedded).toBe(false);
-    expect(res.content.some((c) => c.type === 'resource')).toBe(false);
-    expect(res.content.some((c) => c.type === 'resource_link')).toBe(true);
-    expect(res.structuredContent.message).toContain('not embedded');
-  });
+    const res = await generateReport(dataOf([], { deps }), linkProvider({ routesActive: false }), new ReportCache());
+    const sbom = res.files.find((f) => f.format === 'sbom');
+    expect(sbom?.bytes).toBeGreaterThan(INLINE_LIMIT_BYTES);
+    expect(sbom?.inline).toBeUndefined();
+    expect(res.message).toContain('resources');
+  }, 30_000);
 });
 
 describe('real sample: php-shop fixture', () => {

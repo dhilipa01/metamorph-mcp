@@ -561,3 +561,67 @@ body {
   stroke: var(--bg);
   stroke-width: 1.4;
 }
+
+/* report: downloads and preview */
+.sd .dls {
+  gap: 0;
+  padding: 0 16px;
+}
+.sd .dl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.sd .dl:first-child {
+  border-top: 0;
+}
+.sd .dl-info {
+  min-width: 0;
+}
+.sd .dl-info h3 {
+  margin: 0;
+}
+.sd .dl-path {
+  margin-top: 4px;
+}
+.sd .btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  min-width: 96px;
+  padding: 0 16px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--bg);
+  font-weight: 600;
+  text-decoration: none;
+}
+.sd .btn:hover {
+  filter: brightness(1.08);
+}
+.sd .btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.sd .prev {
+  padding: 0;
+}
+.sd .prev li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (max-width: 480px) {
+  .sd .dl {
+    flex-wrap: wrap;
+  }
+  .sd .dl .btn {
+    width: 100%;
+  }
+}

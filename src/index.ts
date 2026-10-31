@@ -12,6 +12,7 @@
 import 'dotenv/config';
 import { McpApplicationFactory } from '@nitrostack/core';
 import { AppModule } from './app.module.js';
+import { registerReportRoutes, type AppLike } from './modules/report/download.js';
 
 /**
  * Bootstrap the application
@@ -20,6 +21,10 @@ async function bootstrap() {
   // Create and start the MCP server
   const server = await McpApplicationFactory.create(AppModule);
   await server.start();
+  // Signed report downloads live on the same Express app as /mcp. STDIO-only runs have no HTTP transport and no links.
+  const http = server.getHttpTransport?.();
+  const app = http?.getApp?.();
+  if (app) registerReportRoutes(app as unknown as AppLike);
 }
 
 // Start the application

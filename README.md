@@ -17,6 +17,7 @@ MCP server that looks at a legacy repo, scores it, plans a staged upgrade, shows
 | `assess_project` | read | Scans a public GitHub repo (Node or PHP), returns a 0-100 score, findings by severity and category. Renders the score dashboard widget |
 | `plan_modernization` | plan | Staged plan for goal `patch_advisory`, `upgrade_runtime` or `modernize_all`. Some stages automated, others guided. Widget |
 | `preview_changes` | read | Read-only. File list and diff for one stage, plus `approvalToken` (guided stages return steps, not a diff) |
+| `generate_report` | read | Always produces three files, no options: PDF, SARIF 2.1.0 and CycloneDX 1.5 SBOM. Returns a signed download link per file (valid 10 minutes), score, counts and page count. Widget with download buttons |
 | `apply_stage` | write | Verifies the token, applies the stage to a temp copy, re-scans it, returns patch plus projected score. Widget |
 
 ## Security model
@@ -55,6 +56,7 @@ MCP server that looks at a legacy repo, scores it, plans a staged upgrade, shows
 - `npm run dev` starts the MCP server plus the widget server. Ports 3001 and 3002 must be free
 - Copy `.env.example` to `.env`. For local calls without a key set `METAMORPH_AUTH=off` (local only, never on a host)
 - To test approvals set `METAMORPH_TOKEN_SECRET` (32+ chars) and a key: `METAMORPH_KEY_OWNER=write:<sha256 hex of your key>`
+- Report download links (`generate_report`) are `GET /reports/<id>.<pdf|sarif|cdx.json>?t=<token>` on the same HTTP server as `/mcp`, so they need `MCP_TRANSPORT_TYPE=http` or `dual` and `METAMORPH_TOKEN_SECRET` (32+ chars). Set `METAMORPH_PUBLIC_URL` (for example `https://metamorph.example.com`) to get absolute, clickable links; without it the tool returns relative paths. The token is an HMAC bound to report id, file type and a 10 minute expiry; reports live in memory of one server instance, so after expiry or a restart the link answers 404 and you run `generate_report` again
 - Never commit `.env`
 
 ## Connect

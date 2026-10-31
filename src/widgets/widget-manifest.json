@@ -4,13 +4,14 @@
     {
       "uri": "/score-dashboard",
       "name": "Score Dashboard",
-      "description": "Modernization score ring, category bars, top findings, dependency and runtime facts for an assessed project; also renders the staged plan from plan_modernization and the projected before/after result from apply_stage.",
+      "description": "Modernization score ring, category bars, top findings, dependency and runtime facts for an assessed project; also renders the staged plan from plan_modernization and the projected before/after result from apply_stage. Also renders the generate_report result: score, finding counts and download buttons for the PDF, SARIF and SBOM.",
       "tags": [
         "assessment",
         "score",
         "findings",
         "plan",
-        "apply"
+        "apply",
+        "report"
       ],
       "examples": [
         {
@@ -306,6 +307,71 @@
               "Run: composer update guzzlehttp/guzzle symfony/http-kernel"
             ],
             "note": "Projected from a throwaway copy. Refresh the lockfile, then run assess_project to confirm."
+          }
+        },
+        {
+          "name": "Generated report with signed links",
+          "description": "generate_report output: three files with signed download links.",
+          "data": {
+            "reportId": "a1b2c3d4e5f60718293a4b5c",
+            "score": {
+              "overall": 17,
+              "origin": "measured"
+            },
+            "findings": {
+              "total": 11,
+              "critical": 0,
+              "high": 6,
+              "medium": 1,
+              "low": 3,
+              "info": 1
+            },
+            "topFindings": [
+              {
+                "severity": "high",
+                "title": "guzzlehttp/guzzle@6.5.0 has 1 known advisories"
+              },
+              {
+                "severity": "high",
+                "title": "Uses the mysql_* API removed in PHP 7.0"
+              },
+              {
+                "severity": "high",
+                "title": "SQL query built from request input"
+              }
+            ],
+            "pages": 9,
+            "files": [
+              {
+                "format": "pdf",
+                "label": "PDF report",
+                "fileName": "metamorph-report-a1b2c3d4.pdf",
+                "bytes": 184320,
+                "mimeType": "application/pdf",
+                "uri": "metamorph://report/a1b2c3d4e5f60718293a4b5c.pdf",
+                "downloadUrl": "https://metamorph.example.com/reports/a1b2c3d4e5f60718293a4b5c.pdf?t=EXAMPLE"
+              },
+              {
+                "format": "sarif",
+                "label": "SARIF 2.1.0 findings",
+                "fileName": "metamorph-report-a1b2c3d4.sarif",
+                "bytes": 24576,
+                "mimeType": "application/sarif+json",
+                "uri": "metamorph://report/a1b2c3d4e5f60718293a4b5c.sarif",
+                "downloadUrl": "https://metamorph.example.com/reports/a1b2c3d4e5f60718293a4b5c.sarif?t=EXAMPLE"
+              },
+              {
+                "format": "sbom",
+                "label": "CycloneDX 1.5 SBOM",
+                "fileName": "metamorph-report-a1b2c3d4.cdx.json",
+                "bytes": 3072,
+                "mimeType": "application/vnd.cyclonedx+json",
+                "uri": "metamorph://report/a1b2c3d4e5f60718293a4b5c.cdx.json",
+                "downloadUrl": "https://metamorph.example.com/reports/a1b2c3d4e5f60718293a4b5c.cdx.json?t=EXAMPLE"
+              }
+            ],
+            "expiresInMinutes": 10,
+            "message": "Download links (valid 10 minutes):"
           }
         }
       ]

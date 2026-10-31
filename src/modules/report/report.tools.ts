@@ -1,11 +1,13 @@
-import { ToolDecorator as Tool, ResourceDecorator as Resource, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ToolDecorator as Tool, ResourceDecorator as Resource, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { assessFull } from '../assessment/assess.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
 import { buildPlan } from '../planning/plan.js';
-import { MIME, generateReport, lookupResource, type ReportFormat } from './report.js';
+import { MIME, generateReport, lookupResource } from './report.js';
+import { reportRoutesActive } from './download.js';
+import { linkProvider } from './links.js';
 import { buildReportData, type ReportData } from './report-data.js';
 import { recordFeeds } from './feed-sources.js';
 import { projectAutomatedStages } from '../planning/apply.js';
@@ -24,30 +26,43 @@ export class ReportTools {
   @Tool({
     name: 'generate_report',
     description:
-      'Generate an assessment report for a public GitHub repository: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. Formats under 1 MB are returned embedded in the result (PDF as base64, SARIF and SBOM as text); all are also readable as metamorph://report/<id> resources for 10 minutes. Read-only: nothing is changed.',
+      'Generate an assessment report for a public GitHub repository. Always produces three files: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. The result lists a signed download link for each file (valid 10 minutes; absolute when the server has METAMORPH_PUBLIC_URL), the score, finding counts and page count; the files are also readable as metamorph://report/<id> resources for 10 minutes. Read-only: nothing is changed.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe('Public GitHub repository URL, e.g. https://github.com/owner/repo (a /tree/<branch> link works)'),
       subfolder: z.string().max(200).optional().describe('Optional folder inside the repository, e.g. apps/api'),
-      formats: z.array(z.enum(['pdf', 'sarif', 'sbom'])).min(1).max(3).optional().describe('Formats to produce; default ["pdf"]'),
       goal: z.enum(GOALS).optional().describe('Plan goal used for the plan section: patch_advisory, upgrade_runtime or modernize_all (default)')
     }),
     examples: {
-      request: { repo_url: 'https://github.com/owner/legacy-app', formats: ['pdf', 'sarif'] },
+      request: { repo_url: 'https://github.com/owner/legacy-app' },
       response: {
         reportId: 'a1b2c3d4e5f60718293a4b5c',
         score: { overall: 52, origin: 'measured' },
         findings: { total: 9, critical: 0, high: 3, medium: 4, low: 2, info: 0 },
+        topFindings: [{ severity: 'high', title: 'SQL query built from request input' }],
         pages: 8,
-        formats: [{ format: 'pdf', bytes: 180000, mimeType: 'application/pdf', uri: 'metamorph://report/a1b2c3d4e5f60718293a4b5c.pdf', embedded: true }],
-        message: 'All requested formats are embedded. They are also readable as resources for 10 minutes.'
+        files: [
+          {
+            format: 'pdf',
+            label: 'PDF report',
+            fileName: 'metamorph-report-a1b2c3d4.pdf',
+            bytes: 180000,
+            mimeType: 'application/pdf',
+            uri: 'metamorph://report/a1b2c3d4e5f60718293a4b5c.pdf',
+            downloadUrl: 'https://metamorph.example.com/reports/a1b2c3d4e5f60718293a4b5c.pdf?t=<signed token>'
+          }
+        ],
+        expiresInMinutes: 10,
+        message: 'Download links (valid 10 minutes): ...'
       }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
-  async generateReport(input: { repo_url: string; subfolder?: string; formats?: ReportFormat[]; goal?: Goal }, ctx: ExecutionContext) {
-    ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all', formats: (input.formats ?? ['pdf']).join(',') });
+  async generateReport(input: { repo_url: string; subfolder?: string; goal?: Goal }, ctx: ExecutionContext) {
+    ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all' });
     const data = await collectReportData(input, ctx);
-    return generateReport(data, input.formats ?? ['pdf']);
+    const links = linkProvider({ secret: process.env.METAMORPH_TOKEN_SECRET, publicUrl: process.env.METAMORPH_PUBLIC_URL, routesActive: reportRoutesActive() });
+    return generateReport(data, links);
   }
 }
 

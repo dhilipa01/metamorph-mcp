@@ -8,6 +8,10 @@ export const MAX_STRING = 200;
 export const MAX_FIXED = 15;
 export const MAX_REMAINING = 5;
 export const MAX_FILES = 10;
+export const MAX_REPORT_FILES = 3;
+export const MAX_REPORT_FINDINGS = 3;
+// Largest inline (base64 or text) copy the widget will turn into a Blob link. Matches the server's INLINE_LIMIT_BYTES.
+export const MAX_INLINE_BYTES = 256 * 1024;
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Risk = 'low' | 'medium' | 'high';
@@ -82,11 +86,41 @@ export interface ApplyVM {
   note?: string;
 }
 
+export type ReportFormatId = 'pdf' | 'sarif' | 'sbom';
+
+export interface ReportFileVM {
+  format: ReportFormatId;
+  label: string;
+  fileName: string;
+  bytes: number;
+  sizeLabel: string;
+  // Where the user gets the file, best first: a signed absolute link, else bytes embedded by the server (the page
+  // makes a Blob link), else a relative path or resource URI to show as text.
+  href?: string;
+  inline?: { encoding: 'base64' | 'utf8'; data: string; mimeType: string };
+  path?: string;
+  uri?: string;
+}
+
+export interface ReportVM {
+  kind: 'report';
+  reportId: string;
+  score: number;
+  origin: string;
+  counts: Array<{ severity: Severity; count: number }>;
+  findingTotal: number;
+  topFindings: Array<{ severity: Severity; title: string }>;
+  pages?: number;
+  files: ReportFileVM[];
+  expiresInMinutes?: number;
+  message?: string;
+}
+
 export interface EmptyVM {
   kind: 'empty';
 }
 
-export type ViewModel = AssessmentVM | PlanVM | ApplyVM | EmptyVM;
+export type ViewModel = AssessmentVM | PlanVM | ApplyVM | ReportVM | EmptyVM;
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 const RISKS: Risk[] = ['low', 'medium', 'high'];
@@ -232,6 +266,79 @@ function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>
   };
 }
 
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const FORMATS_ID: readonly ReportFormatId[] = ['pdf', 'sarif', 'sbom'];
+const MIME_BY_FORMAT: Record<ReportFormatId, string> = { pdf: 'application/pdf', sarif: 'application/sarif+json', sbom: 'application/vnd.cyclonedx+json' };
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+// http(s) only: never hand a javascript: or data: URL to an anchor.
+function safeHttpUrl(v: unknown): string | undefined {
+  if (typeof v !== 'string' || v.length > 2048) return undefined;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function inlineOf(raw: unknown, format: ReportFormatId): ReportFileVM['inline'] {
+  if (!isObj(raw) || typeof raw.data !== 'string') return undefined;
+  const encoding = raw.encoding === 'base64' ? 'base64' : raw.encoding === 'utf8' ? 'utf8' : undefined;
+  if (!encoding) return undefined;
+  const size = encoding === 'base64' ? Math.floor((raw.data.length * 3) / 4) : raw.data.length;
+  if (size > MAX_INLINE_BYTES) return undefined;
+  if (encoding === 'base64' && !BASE64.test(raw.data)) return undefined;
+  return { encoding, data: raw.data, mimeType: MIME_BY_FORMAT[format] };
+}
+
+function reportFile(raw: unknown): ReportFileVM | undefined {
+  if (!isObj(raw)) return undefined;
+  const format = oneOf(raw.format, FORMATS_ID, 'pdf');
+  if (!FORMATS_ID.includes(raw.format as ReportFormatId)) return undefined;
+  const bytes = count(raw.bytes);
+  const path = str(raw.downloadPath);
+  return {
+    format,
+    label: str(raw.label) ?? format.toUpperCase(),
+    fileName: str(raw.fileName) ?? `report.${format}`,
+    bytes,
+    sizeLabel: formatBytes(bytes),
+    href: safeHttpUrl(raw.downloadUrl),
+    inline: inlineOf(raw.inline, format),
+    path: path && path.startsWith('/') ? path : undefined,
+    uri: str(raw.uri)
+  };
+}
+
+function toReport(o: Record<string, unknown>, score: Record<string, unknown>): ReportVM {
+  const f = isObj(o.findings) ? o.findings : {};
+  const counts = SEVERITIES.map((severity) => ({ severity, count: count(f[severity]) }));
+  const top = list(o.topFindings, MAX_REPORT_FINDINGS, (t) => {
+    if (!isObj(t)) return undefined;
+    const title = str(t.title);
+    return title ? { severity: oneOf(t.severity, SEVERITIES, 'info'), title } : undefined;
+  });
+  return {
+    kind: 'report',
+    reportId: (str(o.reportId) ?? '').slice(0, 24),
+    score: pct(score.overall) ?? 0,
+    origin: str(score.origin) ?? 'measured',
+    counts,
+    findingTotal: Math.max(count(f.total), counts.reduce((a, c) => a + c.count, 0)),
+    topFindings: top,
+    pages: num(o.pages) === undefined ? undefined : count(o.pages),
+    files: list(o.files, MAX_REPORT_FILES, reportFile),
+    expiresInMinutes: num(o.expiresInMinutes) === undefined ? undefined : count(o.expiresInMinutes),
+    message: typeof o.message === 'string' ? o.message.trim().slice(0, 1000) || undefined : undefined
+  };
+}
+
 export function toViewModel(output: unknown): ViewModel {
   try {
     let o: unknown = output;
@@ -243,6 +350,7 @@ export function toViewModel(output: unknown): ViewModel {
       }
     }
     if (!isObj(o)) return { kind: 'empty' };
+    if (typeof o.reportId === 'string' && Array.isArray(o.files) && isObj(o.score) && num(o.score.overall) !== undefined) return toReport(o, o.score);
     if (Array.isArray(o.stages)) {
       return {
         kind: 'plan',

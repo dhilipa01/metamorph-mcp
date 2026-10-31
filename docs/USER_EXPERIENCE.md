@@ -10,7 +10,7 @@ Teams that own legacy PHP or Node apps (mostly private repos) and need to know w
    - Build status: the data fields exist on findings (kev, epss, cvss, cwe, owasp). The ranking itself is not built: today findings and `topFindings` sort by severity only. TODO: sort and group by exploited, then EPSS, then severity, and show why each item is ranked where it is.
 2. **A fix that was verified** (runner result, not projection).
 3. **One call from the AI client**, one approval, ending in a branch pull request (merge stays manual).
-4. **A report to forward** (PDF, SARIF, SBOM).
+4. **A report to forward**: always PDF, SARIF and SBOM together (no format choice), each with a signed 10 minute download link and a widget with download buttons.
 5. **Ongoing watch** of new advisories for the user's stack.
 
 ## 3. Choices the user always has

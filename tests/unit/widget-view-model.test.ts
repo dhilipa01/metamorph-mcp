@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_FILES, MAX_FINDINGS, MAX_FIXED, MAX_REMAINING, MAX_STAGES, MAX_STEPS, MAX_STRING, scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type PlanVM } from '../../src/widgets/lib/view-model.js';
+import { MAX_FILES, MAX_FINDINGS, MAX_INLINE_BYTES, formatBytes, MAX_FIXED, MAX_REMAINING, MAX_STAGES, MAX_STEPS, MAX_STRING, scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type PlanVM, type ReportVM } from '../../src/widgets/lib/view-model.js';
 
 const assessment = {
   assessmentId: 'abc',
@@ -231,5 +231,66 @@ describe('toViewModel plan (planning tool output)', () => {
     ]);
     expect(vm.stages[0].rollback).toBe('Revert composer.json.');
     expect(vm.hint).toContain('preview_changes');
+  });
+});
+
+describe('toViewModel report (generate_report output)', () => {
+  const report = {
+    reportId: 'a1b2c3d4e5f60718293a4b5c',
+    score: { overall: 52, origin: 'measured' },
+    findings: { total: 9, critical: 0, high: 3, medium: 4, low: 2, info: 0 },
+    topFindings: [
+      { severity: 'high', title: 'SQL query built from request input' },
+      { severity: 'bogus', title: 'Odd severity' }
+    ],
+    pages: 8,
+    files: [
+      { format: 'pdf', label: 'PDF report', fileName: 'metamorph-report-a1b2c3d4.pdf', bytes: 180000, mimeType: 'application/pdf', uri: 'metamorph://report/x.pdf', downloadUrl: 'https://m.example.com/reports/x.pdf?t=abc' },
+      { format: 'sarif', label: 'SARIF 2.1.0 findings', fileName: 'r.sarif', bytes: 900, mimeType: 'application/sarif+json', uri: 'metamorph://report/x.sarif', downloadPath: '/reports/x.sarif?t=abc' },
+      { format: 'sbom', label: 'CycloneDX 1.5 SBOM', fileName: 'r.cdx.json', bytes: 2_000_000, mimeType: 'application/vnd.cyclonedx+json', uri: 'metamorph://report/x.cdx.json' }
+    ],
+    expiresInMinutes: 10,
+    message: 'Download links (valid 10 minutes):'
+  };
+
+  it('is recognised before the assessment branch even though it has score.overall', () => {
+    const vm = toViewModel(report) as ReportVM;
+    expect(vm.kind).toBe('report');
+    expect(vm.score).toBe(52);
+    expect(vm.origin).toBe('measured');
+    expect(vm.pages).toBe(8);
+    expect(vm.findingTotal).toBe(9);
+    expect(vm.counts.find((c) => c.severity === 'high')?.count).toBe(3);
+    expect(vm.topFindings.map((t) => t.severity)).toEqual(['high', 'info']);
+    expect(vm.files.map((f) => [f.format, f.sizeLabel])).toEqual([['pdf', '176 KB'], ['sarif', '900 B'], ['sbom', '1.9 MB']]);
+    expect(vm.files[0].href).toBe('https://m.example.com/reports/x.pdf?t=abc');
+    expect(vm.files[1].href).toBeUndefined();
+    expect(vm.files[1].path).toBe('/reports/x.sarif?t=abc');
+  });
+  it('accepts only http(s) download links', () => {
+    for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'nope']) {
+      const vm = toViewModel({ ...report, files: [{ ...report.files[0], downloadUrl: bad }] }) as ReportVM;
+      expect(vm.files[0].href).toBeUndefined();
+    }
+  });
+  it('keeps inline copies only under the cap and only when well formed', () => {
+    const ok = Buffer.from('%PDF-1.7').toString('base64');
+    const f = (inline: unknown) => (toViewModel({ ...report, files: [{ ...report.files[0], downloadUrl: undefined, inline }] }) as ReportVM).files[0].inline;
+    expect(f({ encoding: 'base64', data: ok })?.mimeType).toBe('application/pdf');
+    expect(f({ encoding: 'base64', data: 'not*base64!' })).toBeUndefined();
+    expect(f({ encoding: 'base64', data: 'A'.repeat(Math.ceil((MAX_INLINE_BYTES * 4) / 3) + 8) })).toBeUndefined();
+    expect(f({ encoding: 'utf8', data: 'x'.repeat(MAX_INLINE_BYTES + 1) })).toBeUndefined();
+    expect(f({ encoding: 'hex', data: 'ab' })).toBeUndefined();
+  });
+  it('caps files and findings, drops unknown formats, and never throws on junk', () => {
+    const many = Array.from({ length: 8 }, () => report.files[0]);
+    expect((toViewModel({ ...report, files: many }) as ReportVM).files).toHaveLength(3);
+    expect((toViewModel({ ...report, files: [{ format: 'exe', bytes: 1 }] }) as ReportVM).files).toHaveLength(0);
+    expect((toViewModel({ ...report, topFindings: Array.from({ length: 9 }, (_, i) => ({ severity: 'low', title: `t${i}` })) }) as ReportVM).topFindings).toHaveLength(3);
+    expect(toViewModel({ reportId: 'x', files: 'nope', score: { overall: 1 } }).kind).toBe('assessment');
+    expect(toViewModel({ reportId: 'x', files: [], score: null }).kind).toBe('empty');
+  });
+  it('formats sizes', () => {
+    expect([formatBytes(12), formatBytes(2048), formatBytes(3 * 1024 * 1024)]).toEqual(['12 B', '2 KB', '3.0 MB']);
   });
 });
