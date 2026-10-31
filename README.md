@@ -32,8 +32,8 @@ MCP server that looks at a legacy repo, scores it, plans a staged upgrade, shows
 - Full analysis: `docs/THREAT_MODEL.md` (OWASP MCP Top 10 mapping), `SECURITY.md`
 
 ## Results (live deployed server, demo repo `dhilipa01/metamorph-demo-legacy`)
-- `php-shop`: score 17 before. Low because of known-vulnerable dependencies (fixed per-severity deductions: high 12, critical 25, medium 5, low 2)
-- `php-shop` after `apply_stage` `patch-dependencies`: projected 41 (+24). Fixes the `guzzlehttp/guzzle` and `symfony/http-kernel` advisories; this is a projection on the sandbox copy, not a change to your repo
+- `php-shop`: score 17 before, 11 findings. Two come from known-vulnerable dependencies (guzzle, symfony/http-kernel, high severity, 12 points each); the rest are runtime end-of-life and risky PHP code patterns (fixed deductions: critical 25, high 12, medium 5, low 2)
+- `php-shop` after `apply_stage` `patch-dependencies`: projected 41 (+24). Fixes those two dependency advisories (2 x 12 = +24); this is a projection on the sandbox copy, not a change to your repo
 - `php-shop-modernized`: 100. The cleaned-up reference version has no findings, so nothing is deducted
 - `node-orders`: 43. Node sample with remaining findings; the per-finding breakdown is in the `assess_project` output
 - 391 unit tests pass
