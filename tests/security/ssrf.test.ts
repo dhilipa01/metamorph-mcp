@@ -217,6 +217,7 @@ describe('through the real tools: no request leaves for a hostile repo_url', () 
   it('assess_project, plan_modernization, preview_changes, apply_stage and generate_report refuse before any network call', async () => {
     off = installOfflineFetch({ tarball: repoTarball({ 'package.json': '{}' }) });
     const { ctx } = loggedCtx();
+    (ctx as unknown as { auth: unknown }).auth = { subject: 'k', scopes: ['write'], claims: { keyId: '0123456789ab' } }; // generate_report needs a key id when auth is on
     for (const repo_url of HOSTILE) {
       await expect(new AssessmentTools().assessProject({ repo_url }, ctx)).rejects.toThrow(/Invalid repository URL/);
       await expect(new PlanningTools().planModernization({ repo_url }, ctx)).rejects.toThrow(/Invalid repository URL/);

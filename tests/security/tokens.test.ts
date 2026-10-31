@@ -9,6 +9,7 @@ import { installOfflineFetch, loggedCtx, repoTarball, type Offline } from '../he
 
 // Forged, expired, tampered and re-used tokens; domain separation between the two token types.
 const SECRET = 'security-test-secret-security-test-secret';
+const KID = 'a1b2c3d4e5f6';
 const OTHER = 'another-secret-another-secret-another!!';
 const NOW = 1_900_000_000;
 const claim = { planHash: 'a'.repeat(64), patchHash: 'b'.repeat(64), stage: 1 };
@@ -164,7 +165,7 @@ describe('approval tokens: reuse across stages, plans and repositories (through 
 
 describe('download tokens: forgery, expiry, reuse across files', () => {
   const id = 'a'.repeat(24);
-  const good = signDownloadToken({ id, ext: 'pdf' }, SECRET, NOW);
+  const good = signDownloadToken({ id, ext: 'pdf', kid: KID }, SECRET, NOW);
   it('valid for exactly its id and extension', () => {
     expect(verifyDownloadToken(good, { id, ext: 'pdf' }, SECRET, NOW).ok).toBe(true);
   });
@@ -177,13 +178,13 @@ describe('download tokens: forgery, expiry, reuse across files', () => {
   it('expires at its ttl and the ttl cannot be raised above an hour', () => {
     expect(verifyDownloadToken(good, { id, ext: 'pdf' }, SECRET, NOW + 599).ok).toBe(true);
     expect(verifyDownloadToken(good, { id, ext: 'pdf' }, SECRET, NOW + 600)).toMatchObject({ ok: false, reason: 'expired' });
-    expect(() => signDownloadToken({ id, ext: 'pdf', ttlSeconds: 3601 }, SECRET, NOW)).toThrow();
-    expect(() => signDownloadToken({ id, ext: 'pdf', ttlSeconds: -5 }, SECRET, NOW)).toThrow();
+    expect(() => signDownloadToken({ id, ext: 'pdf', kid: KID, ttlSeconds: 3601 }, SECRET, NOW)).toThrow();
+    expect(() => signDownloadToken({ id, ext: 'pdf', kid: KID, ttlSeconds: -5 }, SECRET, NOW)).toThrow();
   });
   it('tampering with any part is refused', () => {
     const [part, sig] = good.split('.');
     const p = JSON.parse(Buffer.from(part, 'base64url').toString());
-    for (const edit of [{ exp: p.exp + 10 ** 6 }, { id: 'b'.repeat(24) }, { ext: 'sarif' }, { v: 2 }]) {
+    for (const edit of [{ exp: p.exp + 10 ** 6 }, { id: 'b'.repeat(24) }, { ext: 'sarif' }, { v: 1 }, { kid: 'ffffffffffff' }]) {
       expect(verifyDownloadToken(`${b64({ ...p, ...edit })}.${sig}`, { id: edit.id ?? id, ext: edit.ext ?? 'pdf' }, SECRET, NOW).ok).toBe(false);
     }
     expect(verifyDownloadToken(`${part}.${sig.slice(0, -2)}`, { id, ext: 'pdf' }, SECRET, NOW).ok).toBe(false);
@@ -196,7 +197,7 @@ describe('download tokens: forgery, expiry, reuse across files', () => {
     }
   });
   it('a short secret is a configuration error', () => {
-    expect(() => signDownloadToken({ id, ext: 'pdf' }, 'short', NOW)).toThrow();
+    expect(() => signDownloadToken({ id, ext: 'pdf', kid: KID }, 'short', NOW)).toThrow();
     expect(() => verifyDownloadToken(good, { id, ext: 'pdf' }, 'short', NOW)).toThrow();
   });
 });
@@ -204,7 +205,7 @@ describe('download tokens: forgery, expiry, reuse across files', () => {
 describe('domain separation between approval and download tokens (same secret)', () => {
   const id = 'c'.repeat(24);
   const approval = signApprovalToken(claim, SECRET, NOW);
-  const download = signDownloadToken({ id, ext: 'pdf' }, SECRET, NOW);
+  const download = signDownloadToken({ id, ext: 'pdf', kid: KID }, SECRET, NOW);
 
   it('an approval token is not a download token and a download token is not an approval token', () => {
     expect(verifyDownloadToken(approval, { id, ext: 'pdf' }, SECRET, NOW)).toMatchObject({ ok: false, reason: 'bad_signature' });
@@ -217,7 +218,7 @@ describe('domain separation between approval and download tokens (same secret)',
     expect(verifyApprovalToken(`${ap}.${download.split('.')[1]}`, claim, SECRET, NOW).ok).toBe(false);
   });
   it('an approval-style signature (no prefix) over a download payload is refused, and the download signature is prefixed', () => {
-    const payload = b64({ v: 1, id, ext: 'pdf', exp: NOW + 600 });
+    const payload = b64({ v: 2, id, ext: 'pdf', kid: KID, exp: NOW + 600 });
     expect(verifyDownloadToken(`${payload}.${hmac(SECRET, payload)}`, { id, ext: 'pdf' }, SECRET, NOW).ok).toBe(false);
     expect(verifyDownloadToken(`${payload}.${hmac(SECRET, `metamorph-download.${payload}`)}`, { id, ext: 'pdf' }, SECRET, NOW).ok).toBe(true);
   });
@@ -235,7 +236,10 @@ describe('report download route: tokens at the HTTP edge', () => {
   cache.put(id, [
     { format: 'pdf', mimeType: 'application/pdf', data: Buffer.from('%PDF-1.7 test') },
     { format: 'sarif', mimeType: 'application/sarif+json', data: Buffer.from('{"version":"2.1.0"}') }
-  ]);
+  ], KID);
+  const idB = 'e'.repeat(24);
+  const KID_B = 'b2c3d4e5f6a1';
+  cache.put(idB, [{ format: 'pdf', mimeType: 'application/pdf', data: Buffer.from('%PDF-1.7 key B') }], KID_B);
   const call = (file: string, query: Record<string, unknown>, now = NOW) => {
     const out = { code: 0, body: '' as string | Buffer, headers: {} as Record<string, string | number> };
     const res: Res = {
@@ -253,7 +257,7 @@ describe('report download route: tokens at the HTTP edge', () => {
     handleReportDownload({ params: { file }, query }, res, { cache, secret: SECRET, now: () => now });
     return out;
   };
-  const pdfToken = signDownloadToken({ id, ext: 'pdf' }, SECRET, NOW);
+  const pdfToken = signDownloadToken({ id, ext: 'pdf', kid: KID }, SECRET, NOW);
 
   it('serves the file for its own token', () => {
     const r = call(`${id}.pdf`, { t: pdfToken });
@@ -268,6 +272,22 @@ describe('report download route: tokens at the HTTP edge', () => {
     expect(call(`${id}.pdf`, { t: { toString: () => pdfToken } }).code).toBe(403);
     expect(call(`${id}.pdf`, {}).code).toBe(403);
     expect(call(`${id}.pdf`, { t: '' }).code).toBe(403);
+  });
+  it('a link issued for key A is refused for a report owned by key B, with the same message as a bad signature', () => {
+    const forKeyA = signDownloadToken({ id: idB, ext: 'pdf', kid: KID }, SECRET, NOW); // validly signed, but the entry belongs to B
+    const wrongOwner = call(`${idB}.pdf`, { t: forKeyA });
+    const badSig = call(`${idB}.pdf`, { t: `${forKeyA.split('.')[0]}.${'A'.repeat(43)}` });
+    expect(wrongOwner.code).toBe(403);
+    expect(String(wrongOwner.body)).not.toContain('%PDF');
+    expect({ code: wrongOwner.code, body: wrongOwner.body }).toEqual({ code: badSig.code, body: badSig.body });
+    expect(call(`${idB}.pdf`, { t: signDownloadToken({ id: idB, ext: 'pdf', kid: KID_B }, SECRET, NOW) }).code).toBe(200);
+  });
+  it('a token without a kid, with a malformed kid, or in the old v1 shape is refused', () => {
+    for (const body of [{ v: 2, id, ext: 'pdf', exp: NOW + 600 }, { v: 2, id, ext: 'pdf', kid: 'ABC', exp: NOW + 600 }, { v: 2, id, ext: 'pdf', kid: 'x'.repeat(13), exp: NOW + 600 }, { v: 1, id, ext: 'pdf', exp: NOW + 600 }]) {
+      const part = b64(body);
+      expect(verifyDownloadToken(`${part}.${createHmac('sha256', SECRET).update(`metamorph-download.${part}`).digest('base64url')}`, { id, ext: 'pdf' }, SECRET, NOW)).toMatchObject({ ok: false, reason: 'malformed' });
+    }
+    expect(() => signDownloadToken({ id, ext: 'pdf', kid: 'NOT VALID' }, SECRET, NOW)).toThrow();
   });
   it('refuses an approval token and an expired token', () => {
     expect(call(`${id}.pdf`, { t: signApprovalToken(claim, SECRET, NOW) }).code).toBe(403);
