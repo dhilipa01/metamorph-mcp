@@ -50,7 +50,7 @@ Metamorph never uses its operator's accounts on behalf of users and never takes 
 - **Artifact mode (default everywhere):** Metamorph returns the ticket, PR body or message payload; the client's own GitHub, Atlassian or Slack MCP submits it under the user's own login. Metamorph holds no credential at all.
 - **Cloud:** the customer creates a read-only role in their own account and trusts Metamorph's identity with an ExternalId (AWS cross-account AssumeRole; Azure federated credential or consented app). No customer key is stored.
 - **GitHub:** a GitHub App that the customer installs on chosen repos; Metamorph holds only the app private key and mints short-lived installation tokens. A fine-grained token is the single-organisation fallback.
-- **Multi-tenant OAuth vault (user connects Linear, Jira, Slack once, tokens stored encrypted per tenant):** not built for the freeze. It needs a database and a connect page outside the model. Listed in README as not built.
+- **Multi-tenant OAuth vault (WS11, BUILD):** user connects Linear, Jira, Slack, GitHub once; tokens are stored encrypted per tenant. Details in section J.
 For the submission instance we provide our own test-account credentials: GitHub token or App on metamorph-demo-legacy, Linear key, Jira site token, Slack/Discord webhooks, Resend key, n8n webhook, AWS read-only role, Azure read-only service principal. Judges get a read-scope Metamorph key only.
 
 ## H. Risks and cut line
@@ -59,3 +59,22 @@ Cut order if time runs out: Azure, Jira, widget stepper, SonarQube/Snyk pull-mod
 
 ## I. Verification gates before any claim
 tsc, tests, build green; live call on the deployed server for every new tool; at least two repos we did not write; widget checked in Studio both themes; PDF opened and looked at; no secret in output or logs (grep of results); OWASP MCP Top 10 and anti-pattern self-score regenerated.
+
+## J. WS11 multi-tenant vault (BUILD)
+- Standard: MCP 2025-11-25 URL-mode elicitation. A server must not ask for passwords, API keys or tokens through form mode; it sends the user to an out-of-band URL, so credentials never pass through the model, the client or its logs. This is the pattern for a server acting as an OAuth client to third parties (checked 2026-10-31 against the spec pages). VERIFY the installed SDK exposes URL-mode elicitation; if not, the tool returns the connect URL as plain output (same security property, less polish).
+- Flow: tool `connect_start(provider)` returns a connect URL carrying a signed, short-lived `state` bound to the caller's Metamorph key id. The user opens it, logs in at the provider (Linear, Atlassian 3LO, Slack, GitHub App install), the provider redirects to `/connect/callback/<provider>` on our server, which exchanges the code (PKCE) and stores the token. Tools afterwards say only `connected: true/false`.
+- Storage: tokens encrypted with AES-256-GCM, a per-record data key wrapped by a master key from env (`METAMORPH_VAULT_KEY`), stored in an external Postgres (`DATABASE_URL`; the NitroStack docs list no managed database or token store, and the host filesystem is not durable). Refresh handled server side; revoke tool `disconnect(provider)`; audit event per use without secrets; tenant id = Metamorph key id (or OAuth subject), every query scoped by tenant id.
+- Webhook and Resend/SMTP settings per tenant stored the same way. AWS/Azure: the vault generates a per-tenant ExternalId; no customer secret stored.
+- Done when: two different keys connect two different accounts and each can only see and use its own; revoking one does not affect the other; a database dump contains no plaintext token; a callback with a forged or expired state is rejected.
+- Owner supplies: a Postgres connection string (free Neon or Supabase project), OAuth client id and secret for each provider app registered under the operator's account (one app per provider, used by all tenants), `METAMORPH_VAULT_KEY` (32 random bytes).
+
+## K. WS12 quality harness (replaces "test accounts will do")
+Four layers from industry practice (unit, protocol, conformance, evals), plus load and real-world measurement:
+1. Unit: vitest (exists, 426+).
+2. Protocol and conformance: MCP Inspector CLI pinned (initialize, tools/list schema checks, valid/invalid calls, 401/403, annotations), run in CI against the built server.
+3. Ground truth: seeded vulnerable fixtures with known answers (planted CVE-affected versions, planted code smells, planted secrets). Metrics: detection recall and false-positive count per rule, patch success rate (build and tests pass after apply in the runner), score change measured by tools.
+4. Real-world corpus: 20 pinned public repos (old PHP and Node projects we did not write), fixed commits, results table with timing and our findings cross-checked against `composer audit`, `npm audit`, OSV-Scanner. Published in the README including the bad results.
+5. Model-facing evals: scripted tasks checking that a model picks the right tool, in the right order, with sensible args (evalview or a small harness), including injection text in advisories and repo files.
+6. Load and resilience: JMeter against /mcp (concurrency, 123s timeout behaviour, memory under the 500 MiB limit with big repos); connector contract tests against a mock provider (429, 5xx, timeouts, partial pages, malformed JSON) run in CI; one real smoke run per provider, then dogfood on this project's own repo and the owner's real accounts.
+7. Security: path traversal, symlink escape, archive bombs, secret redaction, scope bypass, forged tokens/state, SSRF through repo_url and webhook URLs, MCP-specific scanners (Snyk Agent Scan) on our own server.
+Owner of the harness: me, built before WS9; its report goes into the README and the PDF.
