@@ -1,5 +1,6 @@
 import { ToolDecorator as Tool, ResourceDecorator as Resource, Widget, UseGuards, ExecutionContext, z } from '@nitrostack/core';
 import { requestKeyId, scopeGuard } from '../../common/auth/scope.guard.js';
+import { GENERATES_REPORT } from '../../common/tool-annotations.js';
 import { assessFull } from '../assessment/assess.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
@@ -28,8 +29,9 @@ function refOf(repoUrl: string): string | undefined {
 export class ReportTools {
   @Tool({
     name: 'generate_report',
+    annotations: GENERATES_REPORT,
     description:
-      'Generate an assessment report for a public GitHub repository. Always produces three files: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. The result lists a signed download link for each file (valid 10 minutes, tied to the requesting API key but still usable by anyone who holds the link; absolute when the server has METAMORPH_PUBLIC_URL), the score, finding counts and page count; the files are also readable as metamorph://report/<id> resources for 10 minutes. Read-only: nothing is changed.',
+      'Generate an assessment report for a public GitHub repository. Always produces three files: a PDF (cover, summary, findings by CWE/OWASP with KEV and EPSS, plan, patch summary, verification, dependencies, appendix), a SARIF 2.1.0 file and a CycloneDX 1.5 SBOM. Every number is labelled measured, projected or reported. The result lists a signed download link for each file (valid 10 minutes, tied to the requesting API key but still usable by anyone who holds the link; absolute when the server has METAMORPH_PUBLIC_URL), the score, finding counts and page count; the files are also readable as metamorph://report/<id> resources for 10 minutes. Use when the user wants a report, PDF, SARIF or SBOM to keep or share; for a quick answer use assess_project. Read-only, needs a read key: nothing is changed.',
     inputSchema: z.object({
       repo_url: z.string().min(10).max(300).describe('Public GitHub repository URL, e.g. https://github.com/owner/repo (a /tree/<branch> link works)'),
       subfolder: z.string().max(200).optional().describe('Optional folder inside the repository, e.g. apps/api'),

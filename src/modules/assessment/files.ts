@@ -114,9 +114,9 @@ export async function readKeyFiles(dir: string, limits?: Partial<ReadLimits>): P
   try {
     rootStat = await lstat(dir);
   } catch {
-    throw new Error(`Cannot read project directory: ${dir}`);
+    throw new Error('Cannot read project directory. Check the subfolder path.'); // no server path in the message
   }
-  if (!rootStat.isDirectory()) throw new Error(`Not a directory: ${dir}`);
+  if (!rootStat.isDirectory()) throw new Error('Not a directory. Check the subfolder path.');
 
   const result: KeyFiles = { paths: [], contents: {}, php: [], scan: [], workflows: [], truncated: false };
   let scanBytes = 0;

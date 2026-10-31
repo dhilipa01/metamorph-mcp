@@ -26,14 +26,9 @@ const CALL_TIMEOUT_MS = 90_000;
 
 // Known, documented gaps. Keys are check ids (or id prefixes).
 const KNOWN_GAPS = {
-  'tools/annotations':
-    'The SDK supports tool annotations (@nitrostack/core ToolAnnotations), but no Metamorph tool sets them, so tools/list carries none.',
   'invalid-input/schema':
-    'Schema-level validation errors come from the SDK ("Input validation error: ... must NOT have fewer than 10 characters") and name no next step.'
+    'Schema-level validation errors are produced inside the MCP SDK (McpServer.registerTool validates against the advertised JSON Schema before any handler, guard or filter runs) and read "Input validation error: Invalid arguments for tool X: data/field must be string"; NitroStack 1.1.2 exposes no hook to rewrite them. Mitigation: list inputs also accept a single item (analyze_advisory ids and packages, check_watch cve_ids and products), and every error raised by our own code names a next step.'
 };
-
-KNOWN_GAPS['output-size:generate_report'] =
-  'generate_report embeds the whole SARIF document in its result (24 KB for a 10-file fixture), above the 20,000 character budget. Returning the resource URI only would fix it.';
 
 const results = [];
 const record = (id, status, detail) => results.push({ id, status, detail });
@@ -151,8 +146,17 @@ async function main() {
     check('tools/description', tools.length > 0 && noDesc.length === 0, noDesc.length ? `missing or too short: ${noDesc.join(', ')}` : `all ${tools.length} have a description`);
     const noSchema = tools.filter((t) => t.inputSchema?.type !== 'object').map((t) => t.name);
     check('tools/inputSchema', tools.length > 0 && noSchema.length === 0, noSchema.length ? `no object inputSchema: ${noSchema.join(', ')}` : 'all have an object inputSchema');
-    const withAnn = tools.filter((t) => t.annotations && typeof t.annotations === 'object').map((t) => t.name);
-    check('tools/annotations', withAnn.length === tools.length && tools.length > 0, `${withAnn.length} of ${tools.length} tools carry annotations`);
+    // Every tool declares all four hints as booleans, and read-only tools are never marked destructive.
+    const HINTS = ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'];
+    const annBad = tools.filter((t) => !t.annotations || HINTS.some((h) => typeof t.annotations[h] !== 'boolean') || (t.annotations.readOnlyHint && t.annotations.destructiveHint)).map((t) => t.name);
+    check('tools/annotations', tools.length > 0 && annBad.length === 0, annBad.length ? `missing or inconsistent annotations: ${annBad.join(', ')}` : `all ${tools.length} tools carry the four hints`);
+    // Expected values per tool (see src/common/tool-annotations.ts for the reasoning behind each).
+    const EXPECT = {
+      assess_project: [true, true], analyze_advisory: [true, true], check_watch: [true, true], plan_modernization: [true, true], preview_changes: [true, true],
+      generate_report: [true, true], apply_stage: [true, true], verify_patch: [false, true]
+    };
+    const annWrong = Object.entries(EXPECT).filter(([n, [ro, ow]]) => { const a = tools.find((t) => t.name === n)?.annotations; return a && (a.readOnlyHint !== ro || a.openWorldHint !== ow || (n === 'verify_patch' && (a.destructiveHint !== false || a.idempotentHint !== false))); }).map(([n]) => n);
+    check('tools/annotations-values', annWrong.length === 0, annWrong.length ? `unexpected hint values: ${annWrong.join(', ')}` : 'readOnly and openWorld hints match the documented behaviour of every tool; verify_patch is additive and not idempotent');
 
     const unboundedStrings = [];
     const unboundedArrays = [];
@@ -191,12 +195,16 @@ async function main() {
       check(`invalid-input/semantic:${name}`, isToolError(r) && NEXT_STEP.test(text), isToolError(r) ? `"${text.replace(/\s+/g, ' ').slice(0, 140)}"` : 'call did not return isError');
     }
 
+    // a single string where a list is expected is accepted (the SDK would otherwise reject it with an error that names no next step)
+    const single = await call(off, 'analyze_advisory', { packages: 'npm:lodash@4.17.15' });
+    check('tolerant-input/single-string-list', ran(single) && !isToolError(single) && /lodash/.test(textOf(single)), isToolError(single) ? textOf(single).slice(0, 120) : 'packages given as one string was analysed');
+
     // 3. read-tool output sizes on the fixture repo
     const sized = [
       ['assess_project', { repo_url: REPO }],
       ['plan_modernization', { repo_url: REPO }],
       ['preview_changes', { repo_url: REPO, stage: 'patch-dependencies' }],
-      ['generate_report', { repo_url: REPO, formats: ['sarif'] }],
+      ['generate_report', { repo_url: REPO }],
       ['analyze_advisory', { packages: ['npm:lodash@4.17.15'] }]
     ].filter(([n]) => tools.some((t) => t.name === n));
     const outputs = await Promise.all(sized.map(async ([n, a]) => ({ n, r: await call(off, n, a) })));

@@ -95,7 +95,7 @@ function finish(patched: Tracked | undefined, baseline: Tracked | undefined, bas
       ? `Not finished yet. Call verify_patch again with run_id "${ids.run_id}"${ids.baseline_run_id ? ` and baseline_run_id "${ids.baseline_run_id}"` : ''} to check. A cold runner build can take several minutes.`
       : verdict.verified
         ? 'Build succeeded and the project tests ran and passed on the patched code. Pass these run ids to generate_report as runner_run_ids to record it.'
-        : 'Not verified. See unverifiedReasons. This is not a pass: do not treat the patch as tested.'
+        : 'Not verified. See unverifiedReasons. This is not a pass: do not treat the patch as tested. After fixing the cause, call preview_changes for a fresh approval token and verify_patch again.'
   };
 }
 

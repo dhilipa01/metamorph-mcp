@@ -117,6 +117,9 @@ function detectFramework(names: string[]): string | undefined {
   return undefined;
 }
 
+const COMPOSER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const isComposerName = (name: string): boolean => name.length <= 214 && COMPOSER_NAME.test(name);
+
 export function inventoryPhp(inputs: PhpInputs, phpFileCount: number): PhpInventory {
   const hasComposer = (inputs.composerJson ?? '').trim() !== '';
   const hasLock = (inputs.composerLock ?? '').trim() !== '';
@@ -142,10 +145,11 @@ export function inventoryPhp(inputs: PhpInputs, phpFileCount: number): PhpInvent
         }
         continue;
       }
-      if (name.startsWith('ext-') || seen.has(name)) continue;
+      if (name.startsWith('ext-') || seen.has(name) || !isComposerName(name)) continue; // identifier-shaped names only: text with spaces is not a package
       seen.add(name);
       names.push(name);
-      const exact = locked.get(name);
+      const lockedVersion = locked.get(name);
+      const exact = lockedVersion !== undefined && /^[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}$/.test(lockedVersion) ? lockedVersion : undefined;
       if (exact) {
         inv.deps.push({ name, version: exact, dev, approximate: false });
       } else {
