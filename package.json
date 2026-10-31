@@ -14,7 +14,9 @@
     "widget": "npm --prefix src/widgets",
     "test": "vitest run",
     "conformance": "node scripts/conformance.mjs",
-    "eval": "node eval/run-corpus.mjs"
+    "eval": "node eval/run-corpus.mjs",
+    "test:security": "vitest run tests/security",
+    "load": "node scripts/load.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.0",

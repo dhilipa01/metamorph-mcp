@@ -20,7 +20,7 @@ Version 1.0 draft, 2026-10-30. Organizer rule (newer): AI-generated code is allo
 | 5b UI secondary | Selenium (WebDriver) | Second runner on core flows for cross-checking | local [spike S6] | core flows pass |
 | 6 Performance | JMeter against deployed `/mcp` | Latency and error rate under load with a valid key; 401 stays cheap | deployed | thresholds set after a baseline run (no invented numbers); error rate under agreed limit |
 | 7 Web quality | Lighthouse | Core Web Vitals (LCP, CLS, TBT) and PWA checks for widgets and the generated sample app | local | budgets recorded and met or waived |
-| 8 Security | scripted suite (IDs SEC-01 to SEC-22 in `THREAT_MODEL.md`) | OWASP MCP Top 10 controls and Metamorph-specific threats | local and deployed | all pass |
+| 8 Security | `tests/security/*.test.ts` (offline, in `npm test`; results table in `THREAT_MODEL.md`) and IDs SEC-01 to SEC-22 | OWASP MCP Top 10 controls and Metamorph-specific threats | local and deployed | all pass |
 | 9 Deployment validation | smoke after each deploy; Blue-Green style before/after check | New version answers with key, refuses without, same tools list, health endpoint ok | deployed | identical tool list; 200 with key, 401 without |
 | 10 Self-score | `score_mcp_design` on our own tool list | 0 of 10 anti-pattern failures; token cost recorded | local | published in the README |
 
@@ -45,6 +45,13 @@ Local: unit, smoke, integration, security, widget review, Playwright, Lighthouse
 4. Is there a test, and did it fail before the code existed?
 5. Is anything generated flagged "needs review" for the end user?
 6. Does the build pass (`npm run build`)?
+
+## Commands (2026-10-31)
+- `npm test`: unit, ground truth, security (`tests/security`) and the tool-selection proxy (`tests/eval/tool-selection.test.ts`). Offline. `METAMORPH_SKIP_DOCKER=1 npm test` skips the veraPDF test even when docker and the image are present.
+- `npm run test:security`: the security suite alone (about 20 s).
+- `npm run conformance`: Inspector against the built server (about 4 minutes).
+- `npm run load`: concurrency, big input and slow upstream against the built server (about 5 minutes); `-- --quick` skips the last two. Results in `docs/EVAL_RESULTS.md` section 6.
+- `npm run eval`: real-world corpus (network).
 
 ## PDF accessibility check (PDF/UA-1)
 `tests/unit/report-pdfua.test.ts` renders the php-shop sample and the worst-case report fixtures and validates each PDF with veraPDF (`docker run --rm -v DIR:/data:ro verapdf/cli -f ua1 --format xml /data/report.pdf`), asserting zero failed rules. It runs only when `docker` and the image `verapdf/cli` (`docker pull verapdf/cli`) are present; otherwise the suite is skipped and a `[report-pdfua] SKIPPED: reason` line is printed. It takes about 2.5 minutes. A docker-free test in the same file checks that text is tagged real content (not Artifact) and only borders and the running header/footer are artifacts.
