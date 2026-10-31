@@ -4,9 +4,9 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { canonicalHash, verifyApprovalToken } from '../../common/approval-token.js';
 import { redact } from '../../common/redact.js';
-import { resolveInside } from '../../common/safe-archive.js';
-import { assessFull, type Analyzer } from '../assessment/assess.js';
-import type { DependencyFix, FilePatch, Finding, Goal, PlanStage, Severity } from '../assessment/types.js';
+import { createWorkdir, resolveInside } from '../../common/safe-archive.js';
+import { assessFull, type Analyzer, type AssessOptions, type FullAssessment } from '../assessment/assess.js';
+import type { DependencyFix, FilePatch, Finding, Goal, ModernizationPlan, PlanStage, Severity } from '../assessment/types.js';
 import { applyPatches, envKeyNames, generatePatches, shellQuote, untrackCommittedEnv } from './patches.js';
 import { buildPlan } from './plan.js';
 import { renderDiff } from './preview.js';
@@ -225,7 +225,7 @@ async function writeChanged(dir: string, before: Record<string, string>, after: 
 
 export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<ApplyResult> {
   if (typeof opts.secret !== 'string' || opts.secret.length < MIN_SECRET_LEN) throw new Error(NOT_CONFIGURED);
-  const assess = { analyze: opts.analyze, today: opts.today };
+  const assess: AssessOptions = { analyze: opts.analyze, today: opts.today };
   const full = await assessFull(dir, assess);
   const plan = buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal: opts.goal });
   const stage = plan.stages.find((s) => s.id === opts.stage);
@@ -241,6 +241,12 @@ export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<
   const check = checkApproval(opts.token, { planHash: canonicalHash(plan), patchHash: canonicalHash(patches), stage: stage.index }, opts.secret, opts.now);
   if (!check.ok) throw new Error(check.message);
 
+  return projectStage(dir, full, stage, patches, assess);
+}
+
+// Applies already-generated patches to `dir` (which must be a throwaway copy), re-assesses it and builds the PROJECTED
+// result. No approval is checked here: callers either verified one (applyStageInDir) or only report read-only numbers.
+async function projectStage(dir: string, full: FullAssessment, stage: PlanStage, patches: FilePatch[], assess: AssessOptions): Promise<ApplyResult> {
   // Patches may touch files the assessment does not keep (for example .env): start from their recorded contents too.
   const base = { ...full.files };
   for (const p of patches) if (p.before !== undefined && !(p.path in base)) base[p.path] = p.before;
@@ -261,4 +267,27 @@ export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<
     untracked: projected.untracked,
     envKeys
   });
+}
+
+// Read-only reporting helper: the projected result of every automated stage, each computed in its own private copy of
+// `dir` with the same patch generation and projection apply_stage uses. It needs no approval token because nothing is
+// returned that could be applied (only the numbers and the patch text) and `dir` itself is never modified.
+// A stage whose projection fails is left out rather than failing the report.
+export async function projectAutomatedStages(dir: string, full: FullAssessment, plan: ModernizationPlan, assess: AssessOptions = {}): Promise<ApplyResult[]> {
+  const out: ApplyResult[] = [];
+  for (const stage of plan.stages) {
+    if (!stage.automated) continue;
+    const patches = generatePatches({ stack: full.assessment.stack, files: full.files, fixes: full.fixes, stageIds: [stage.id] });
+    if (patches.length === 0) continue;
+    const copy = await createWorkdir(process.env.METAMORPH_SANDBOX_DIR);
+    try {
+      await fs.cp(dir, copy.dir, { recursive: true, dereference: false });
+      out.push(await projectStage(copy.dir, full, stage, patches, assess));
+    } catch {
+      // projection is best effort in a report
+    } finally {
+      await copy.cleanup();
+    }
+  }
+  return out;
 }

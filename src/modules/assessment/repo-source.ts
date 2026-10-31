@@ -1,13 +1,18 @@
 import type { ExecutionContext } from '@nitrostack/core';
 import { archiveUrl, createWorkdir, extractTarGz, fetchArchive, parseGithubRepo, resolveInside } from '../../common/safe-archive.js';
 
+export interface RepoMeta {
+  // Resolved 40-hex commit sha, read from the pax global header GitHub puts in every codeload tarball.
+  commit?: string;
+}
+
 // Downloads a public GitHub repo into a private temp folder, runs `fn` on the (sub)folder and always cleans up.
 // Error messages are safe to show to users: they never contain server paths.
 export async function withRepo<T>(
   repoUrl: string,
   subfolder: string | undefined,
   ctx: Pick<ExecutionContext, 'logger'>,
-  fn: (dir: string) => Promise<T>,
+  fn: (dir: string, meta: RepoMeta) => Promise<T>,
   deps: { fetchFn?: typeof fetch } = {}
 ): Promise<T> {
   let repo: ReturnType<typeof parseGithubRepo>;
@@ -26,8 +31,10 @@ export async function withRepo<T>(
     } catch {
       throw new Error('Could not download the repository. Only public GitHub repositories up to 25 MB are supported; check the URL and branch name.');
     }
+    let meta: RepoMeta = {};
     try {
-      await extractTarGz(archive, work.dir);
+      const r = await extractTarGz(archive, work.dir);
+      meta = r.commit ? { commit: r.commit } : {};
     } catch {
       throw new Error('The repository archive could not be unpacked safely (too large, too many files, or unexpected content).');
     }
@@ -37,7 +44,7 @@ export async function withRepo<T>(
     } catch {
       throw new Error('The subfolder is not valid. Use a path inside the repository, like apps/api.');
     }
-    return await fn(root);
+    return await fn(root, meta);
   } finally {
     await work.cleanup();
   }

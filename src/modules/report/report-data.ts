@@ -37,7 +37,8 @@ export interface FeedsData {
 export interface ReportMeta {
   repoUrl: string;
   subfolder?: string;
-  commit?: string; // commit sha or ref when known
+  commit?: string; // what the cover shows: the commit sha when known, otherwise a ref description
+  commitSha?: string; // resolved 40-hex commit sha (from the GitHub archive); only set when valid
   generatedAt: string; // ISO 8601; also the PDF creation date, so identical input gives identical bytes
 }
 
@@ -103,12 +104,13 @@ export interface ReportData {
   patches: ReportPatch[];
   verification?: { runner: string; startedAt?: string; finishedAt?: string; checks: RunnerSummary['checks']; scoreBefore?: Labelled<number>; scoreAfter?: Labelled<number> };
   tools: Array<{ name: string; version: string }>;
-  sources: Array<{ name: string; url?: string; fetchedAt: string }>; // fetchedAt is "not recorded" when unknown
+  sources: Array<{ name: string; url?: string; fetchedAt: string }>; // fetchedAt: ISO time, "unavailable" (feed was down) or "not recorded"
 }
 
 export const TOOL_NAME = 'Metamorph';
 export const TOOL_VERSION = '1.0.0';
 export const NOT_RECORDED = 'not recorded';
+export const SHA_RE = /^[0-9a-f]{40}$/;
 
 // ---- untrusted text handling ----
 
@@ -176,6 +178,33 @@ function sortFindings(list: ReportFinding[]): ReportFinding[] {
 const m = (value: number, source?: string): Labelled<number> => ({ value, origin: 'measured', ...(source ? { source } : {}) });
 const p = (value: number, source?: string): Labelled<number> => ({ value, origin: 'projected', ...(source ? { source } : {}) });
 
+function verificationOf(runner: RunnerSummary): NonNullable<ReportData['verification']> {
+  return {
+    runner: cleanText(runner.runner, 80),
+    ...(opt(runner.startedAt, 40) ? { startedAt: opt(runner.startedAt, 40) } : {}),
+    ...(opt(runner.finishedAt, 40) ? { finishedAt: opt(runner.finishedAt, 40) } : {}),
+    checks: runner.checks.map((c) => ({ name: cleanText(c.name, 200), status: c.status, ...(opt(c.detail, 500) ? { detail: opt(c.detail, 500) } : {}), ...(typeof c.durationMs === 'number' ? { durationMs: c.durationMs } : {}) })),
+    ...(typeof runner.scoreBefore === 'number' ? { scoreBefore: m(runner.scoreBefore, runner.runner) } : {}),
+    ...(typeof runner.scoreAfter === 'number' ? { scoreAfter: m(runner.scoreAfter, runner.runner) } : {})
+  };
+}
+
+function runnerTools(runner: RunnerSummary | undefined): ReportData['tools'] {
+  return (runner?.tools ?? []).map((t) => ({ name: cleanText(t.name, 80), version: cleanText(t.version, 40) }));
+}
+
+const CHECK_STATUS = new Set(['passed', 'failed', 'skipped']);
+
+// Internal seam for the verification runner: the owner calls this with the runner's validated result once it exists
+// (map its zod-parsed output onto RunnerSummary). It is deliberately not reachable from any tool input. Returns a new
+// ReportData with the verification section filled and the runner's tools added; `data` is not modified.
+export function attachRunnerResult(data: ReportData, summary: RunnerSummary): ReportData {
+  if (typeof summary?.runner !== 'string' || !Array.isArray(summary.checks) || summary.checks.some((c) => !CHECK_STATUS.has(c?.status))) {
+    throw new TypeError('Invalid runner summary: expected a runner name and checks with status passed, failed or skipped.');
+  }
+  return { ...data, verification: verificationOf(summary), tools: [...data.tools, ...runnerTools(summary)] };
+}
+
 export interface BuildReportInput {
   full: FullAssessment;
   meta: ReportMeta;
@@ -203,7 +232,7 @@ export function buildReportData(input: BuildReportInput): ReportData {
   const tools = [
     { name: TOOL_NAME, version: TOOL_VERSION },
     { name: 'Node.js', version: cleanText(process.versions.node, 20) },
-    ...(runner?.tools ?? []).map((t) => ({ name: cleanText(t.name, 80), version: cleanText(t.version, 40) }))
+    ...runnerTools(runner)
   ];
 
   return {
@@ -211,6 +240,7 @@ export function buildReportData(input: BuildReportInput): ReportData {
       repoUrl: cleanText(meta.repoUrl, 300),
       ...(opt(meta.subfolder, 200) ? { subfolder: opt(meta.subfolder, 200) } : {}),
       ...(opt(meta.commit, 80) ? { commit: opt(meta.commit, 80) } : {}),
+      ...(typeof meta.commitSha === 'string' && SHA_RE.test(meta.commitSha) ? { commitSha: meta.commitSha } : {}),
       generatedAt: meta.generatedAt
     },
     stack: cleanText(a.stack, 20),
@@ -260,18 +290,7 @@ export function buildReportData(input: BuildReportInput): ReportData {
       findingsFixed: r.findingsFixed.length,
       remaining: r.remaining.length
     })),
-    ...(runner
-      ? {
-          verification: {
-            runner: cleanText(runner.runner, 80),
-            ...(opt(runner.startedAt, 40) ? { startedAt: opt(runner.startedAt, 40) } : {}),
-            ...(opt(runner.finishedAt, 40) ? { finishedAt: opt(runner.finishedAt, 40) } : {}),
-            checks: runner.checks.map((c) => ({ name: cleanText(c.name, 200), status: c.status, ...(opt(c.detail, 500) ? { detail: opt(c.detail, 500) } : {}), ...(typeof c.durationMs === 'number' ? { durationMs: c.durationMs } : {}) })),
-            ...(typeof runner.scoreBefore === 'number' ? { scoreBefore: m(runner.scoreBefore, runner.runner) } : {}),
-            ...(typeof runner.scoreAfter === 'number' ? { scoreAfter: m(runner.scoreAfter, runner.runner) } : {})
-          }
-        }
-      : {}),
+    ...(runner ? { verification: verificationOf(runner) } : {}),
     tools,
     sources: [...sourceMap.values()]
   };

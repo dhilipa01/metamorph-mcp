@@ -84,6 +84,12 @@ export class KevClient {
     return this.inflight;
   }
 
+  // Every CVE id in the catalog plus when it was fetched. Throws FeedError when the catalog cannot be had.
+  async catalogIds(): Promise<{ ids: Set<string>; fetchedAt: string }> {
+    const cat = await this.load();
+    return { ids: new Set(cat.byId.keys()), fetchedAt: cat.fetchedAt };
+  }
+
   // Throws FeedError when the catalog cannot be had; callers decide whether that is fatal (it never is for assessments).
   async isKnownExploited(cveIds: string[]): Promise<KevResult> {
     const ids = [...new Set(cveIds.map((c) => String(c).trim().toUpperCase()))];

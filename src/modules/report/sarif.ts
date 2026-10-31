@@ -90,6 +90,9 @@ export function buildSarif(d: ReportData): Record<string, unknown> {
       {
         tool: { driver: { name: TOOL_NAME, version: TOOL_VERSION, semanticVersion: TOOL_VERSION, rules } },
         invocations: [{ executionSuccessful: true, endTimeUtc: d.meta.generatedAt }],
+        ...(d.meta.commitSha
+          ? { versionControlProvenance: [{ repositoryUri: d.meta.repoUrl, revisionId: d.meta.commitSha, ...(d.meta.subfolder ? { mappedTo: { uriBaseId: 'SRCROOT', uri: d.meta.subfolder } } : {}) }] }
+          : {}),
         results
       }
     ]

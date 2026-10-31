@@ -227,7 +227,7 @@ describe('extractTarGz', () => {
       { name: 'repo-abc/src/a/b.ts', data: 'export {};\n' }
     ]);
     const r = await extractTarGz(data, dest);
-    expect(r).toEqual({ files: 2, bytes: 5 + 11 });
+    expect(r).toEqual({ files: 2, bytes: 5 + 11, commit: '0123456789abcdef0123456789abcdef01234567' });
     expect(await fs.readFile(path.join(dest, 'README.md'), 'utf8')).toBe('# hi\n');
     expect(await fs.readFile(path.join(dest, 'src/a/b.ts'), 'utf8')).toBe('export {};\n');
     expect(await exists(path.join(dest, 'repo-abc'))).toBe(false);

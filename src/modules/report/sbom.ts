@@ -58,7 +58,7 @@ export function buildSbom(d: ReportData): Record<string, unknown> {
     metadata: {
       timestamp: d.meta.generatedAt,
       tools: { components: [{ type: 'application', name: TOOL_NAME, version: TOOL_VERSION }] },
-      component: { type: 'application', 'bom-ref': projectRef, name: projectName(d), ...(d.meta.commit ? { version: d.meta.commit } : {}) }
+      component: { type: 'application', 'bom-ref': projectRef, name: projectName(d), ...(d.meta.commit ? { version: d.meta.commit } : {}), ...(d.meta.commitSha ? { properties: [{ name: 'metamorph:commit-sha', value: d.meta.commitSha }] } : {}) }
     },
     components,
     dependencies: [{ ref: projectRef, dependsOn: components.map((c) => c['bom-ref'] as string) }]

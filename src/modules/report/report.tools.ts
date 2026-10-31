@@ -6,7 +6,9 @@ import type { Goal } from '../assessment/types.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
 import { buildPlan } from '../planning/plan.js';
 import { MIME, generateReport, lookupResource, type ReportFormat } from './report.js';
-import { buildReportData } from './report-data.js';
+import { buildReportData, type ReportData } from './report-data.js';
+import { recordFeeds } from './feed-sources.js';
+import { projectAutomatedStages } from '../planning/apply.js';
 
 const GOALS = ['patch_advisory', 'upgrade_runtime', 'modernize_all'] as const;
 
@@ -43,20 +45,54 @@ export class ReportTools {
   })
   @UseGuards(scopeGuard('read'))
   async generateReport(input: { repo_url: string; subfolder?: string; formats?: ReportFormat[]; goal?: Goal }, ctx: ExecutionContext) {
-    const goal = input.goal ?? 'modernize_all';
-    ctx.logger.info('generate_report', { goal, formats: (input.formats ?? ['pdf']).join(',') });
-    const { full, plan } = await withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
-      const f = await assessFull(dir);
-      return { full: f, plan: buildPlan({ stack: f.assessment.stack, findings: f.findings, fixes: f.fixes, goal }) };
-    });
-    const ref = refOf(input.repo_url);
-    const data = buildReportData({
-      full,
-      plan,
-      meta: { repoUrl: input.repo_url, subfolder: input.subfolder, commit: ref ? `ref ${ref} (branch or tag, not a commit sha)` : undefined, generatedAt: new Date().toISOString() }
-    });
+    ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all', formats: (input.formats ?? ['pdf']).join(',') });
+    const data = await collectReportData(input, ctx);
     return generateReport(data, input.formats ?? ['pdf']);
   }
+}
+
+export interface CollectDeps {
+  archiveFetch?: typeof fetch;
+  feeds?: Parameters<typeof recordFeeds>[0];
+  now?: () => Date;
+}
+
+// Everything generate_report needs from the network and the repository, as typed ReportData. Read-only.
+export async function collectReportData(
+  input: { repo_url: string; subfolder?: string; goal?: Goal },
+  ctx: Pick<ExecutionContext, 'logger'>,
+  deps: CollectDeps = {}
+): Promise<ReportData> {
+  const goal = input.goal ?? 'modernize_all';
+  const feeds = recordFeeds(deps.feeds);
+  const assess = { ...feeds.options };
+  const { full, plan, apply, commit } = await withRepo(
+    input.repo_url,
+    input.subfolder,
+    ctx,
+    async (dir, repo) => {
+      const f = await assessFull(dir, assess);
+      const p = buildPlan({ stack: f.assessment.stack, findings: f.findings, fixes: f.fixes, goal });
+      // Projected result of each automated stage, computed in private copies (same patches apply_stage uses).
+      const a = await projectAutomatedStages(dir, f, p, assess);
+      return { full: f, plan: p, apply: a, commit: repo.commit };
+    },
+    { fetchFn: deps.archiveFetch }
+  );
+  const ref = refOf(input.repo_url);
+  return buildReportData({
+    full,
+    plan,
+    apply,
+    feeds: { sources: feeds.sources() },
+    meta: {
+      repoUrl: input.repo_url,
+      subfolder: input.subfolder,
+      commit: commit ?? (ref ? `ref ${ref} (branch or tag, not a commit sha)` : undefined),
+      commitSha: commit,
+      generatedAt: (deps.now?.() ?? new Date()).toISOString()
+    }
+  });
 }
 
 // The SDK's resource handler matches {id} templates against the requested URI and returns Buffer as a binary blob.

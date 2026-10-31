@@ -1,6 +1,6 @@
 // Safe repository archive fetch and extraction for the sandbox (OWASP MCP05, SSRF, zip-slip, zip bombs).
 // Pure Node: fetch a GitHub tar.gz over HTTPS, gunzip with an output cap, parse tar by hand, write inside one directory.
-// ponytail: pax records other than `path` and GNU records other than long name are ignored, not interpreted.
+// ponytail: pax records other than `path` (and the global `comment` commit sha) and GNU records other than long name are ignored.
 import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
@@ -245,9 +245,9 @@ function checksumOk(h: Buffer): boolean {
   return sum === octal(h, 148, 8);
 }
 
-function parsePaxPath(data: Buffer): string | undefined {
+function parsePaxRecords(data: Buffer): Map<string, string> {
   let pos = 0;
-  let found: string | undefined;
+  const records = new Map<string, string>();
   while (pos < data.length) {
     const sp = data.indexOf(0x20, pos);
     if (sp === -1) throw new Error('corrupt pax record');
@@ -257,11 +257,28 @@ function parsePaxPath(data: Buffer): string | undefined {
     const eq = rec.indexOf('=');
     if (eq === -1) throw new Error('corrupt pax record');
     const key = rec.slice(0, eq);
-    if (key === 'path') found = rec.slice(eq + 1);
-    else if (key === 'size') throw new Error('pax size override not supported');
+    if (key === 'size') throw new Error('pax size override not supported');
+    records.set(key, rec.slice(eq + 1));
     pos += len;
   }
-  return found;
+  return records;
+}
+
+function parsePaxPath(data: Buffer): string | undefined {
+  return parsePaxRecords(data).get('path');
+}
+
+const SHA_RE = /^[0-9a-f]{40}$/;
+
+// GitHub tarballs start with a pax global header (typeflag 'g') whose `comment` record is the commit sha.
+// Anything that is not exactly 40 lowercase hex characters is ignored; a malformed global header never fails extraction.
+function commitFromGlobalHeader(body: Buffer): string | undefined {
+  try {
+    const c = parsePaxRecords(body).get('comment');
+    return c !== undefined && SHA_RE.test(c) ? c : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Validates an entry path and returns its segments with the top-level folder removed.
@@ -285,7 +302,7 @@ export async function extractTarGz(
   data: Buffer,
   destDir: string,
   limitsIn?: Partial<Limits>
-): Promise<{ files: number; bytes: number }> {
+): Promise<{ files: number; bytes: number; commit?: string }> {
   const limits = mergeLimits(limitsIn);
   let tar: Buffer;
   try {
@@ -300,6 +317,7 @@ export async function extractTarGz(
   let dirs = 0;
   let bytes = 0;
   let pendingName: string | undefined;
+  let commit: string | undefined;
   const skippedLinks: string[] = []; // stripped paths of skipped links; nothing may be written beneath them
   let off = 0;
 
@@ -314,7 +332,11 @@ export async function extractTarGz(
     const body = tar.subarray(bodyStart, bodyStart + size);
     off = bodyStart + Math.ceil(size / BLOCK) * BLOCK;
 
-    if (type === 'g') continue; // pax_global_header
+    if (type === 'g') {
+      // pax_global_header: only the first one counts, and only if it comes before any file entry
+      if (commit === undefined && files === 0 && dirs === 0 && size <= MAX_META) commit = commitFromGlobalHeader(body);
+      continue;
+    }
     if (type === 'x' || type === 'L') {
       if (size > MAX_META) throw new Error('archive metadata record too large');
       if (type === 'x') {
@@ -373,5 +395,5 @@ export async function extractTarGz(
     const target = await resolveInside(destDir, rel); // re-check after directories exist
     await fs.writeFile(target, body, { flag: 'wx', mode: 0o644 });
   }
-  return { files, bytes };
+  return { files, bytes, ...(commit ? { commit } : {}) };
 }
