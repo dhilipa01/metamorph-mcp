@@ -180,6 +180,57 @@ describe('collectReportData (1, 2 and 3 end to end with fakes)', () => {
   });
 });
 
+describe('include_cloud (AWS is reached only when asked)', () => {
+  const account = '1'.repeat(12);
+  const aws = { METAMORPH_AWS_ROLE_ARN: `arn:aws:iam::${account}:role/ReadOnly`, METAMORPH_AWS_EXTERNAL_ID: ['ext', 'id', 'abcdef0123'].join('-'), METAMORPH_AWS_REGIONS: 'eu-west-1' };
+  const run = (input: { include_cloud?: boolean }, cloud: Parameters<typeof collectReportData>[2] = {}) =>
+    collectReportData({ repo_url: 'https://github.com/o/legacy/tree/main', ...input }, ctx, {
+      archiveFetch: serve(tgzOf(REPO_FILES)),
+      feeds: { fetchFn: feedFetch(), osv: { client: osvClient } },
+      ...cloud
+    });
+
+  it('without include_cloud the inventory is never called and there is no cloud section', async () => {
+    let called = 0;
+    const data = await run({}, { cloud: { env: aws, inventory: async () => ((called += 1), undefined as never) } });
+    expect(called).toBe(0);
+    expect(data.cloud).toBeUndefined();
+    const flagOff = await run({ include_cloud: false }, { cloud: { env: aws, inventory: async () => ((called += 1), undefined as never) } });
+    expect(called).toBe(0);
+    expect(flagOff.cloud).toBeUndefined();
+  });
+
+  it('with include_cloud but no AWS setup: a short section, no variable names, generation continues', async () => {
+    let called = 0;
+    const data = await run({ include_cloud: true }, { cloud: { env: {}, inventory: async () => ((called += 1), undefined as never) } });
+    expect(called).toBe(0);
+    expect(data.cloud?.status).toBe('not-configured');
+    expect(JSON.stringify(data.cloud)).not.toMatch(/METAMORPH_|_ARN|EXTERNAL_ID|AWS_REGION/);
+    expect(data.findings.length).toBeGreaterThan(0);
+  });
+
+  it('with include_cloud and AWS set up: the section is added, the repository score is untouched', async () => {
+    const plain = await run({});
+    const withCloud = await run({ include_cloud: true }, {
+      cloud: {
+        env: aws,
+        inventory: async () => ({
+          provider: 'aws', account: '****1111', regions: ['eu-west-1'], services: ['lambda'], counts: { lambda: 2 }, limits: [], severityCounts: { critical: 0, high: 1, medium: 0, low: 0, info: 0 }, findingsTotal: 1, moreFindings: 0,
+          findings: [{ id: 'aws-lambda-runtime-eol:old', category: 'cloud', severity: 'high', title: 'Lambda function old runs nodejs18.x', evidence: 'lambda eu-west-1 old runtime=nodejs18.x', recommendation: 'Move it.', source: 'endoflife.date/aws-lambda', rankReason: 'severity high' }],
+          notChecked: [{ service: 'beanstalk', code: 'NoVerifiedEolSource' }], generatedAt: NOW, note: 'Read-only: nothing was changed in your AWS account.'
+        })
+      }
+    });
+    expect(withCloud.cloud?.status).toBe('scanned');
+    expect(withCloud.cloud?.findings[0]).toMatchObject({ service: 'lambda', region: 'eu-west-1', resource: 'old', source: 'aws-readonly' });
+    expect(withCloud.score).toEqual(plain.score);
+    expect(withCloud.findings).toEqual(plain.findings);
+    expect(withCloud.counts).toEqual(plain.counts);
+    expect(withCloud.measured).toBeUndefined();
+    expect(withCloud.sources.map((x) => x.name)).toContain('AWS read-only inventory (assumed role)');
+  });
+});
+
 describe('4. attachRunnerResult', () => {
   const summary: RunnerSummary = {
     runner: 'docker',

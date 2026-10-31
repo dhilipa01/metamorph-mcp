@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { scoreFindings } from '../../src/modules/assessment/score.js';
 import type { Finding } from '../../src/modules/assessment/types.js';
@@ -15,6 +15,9 @@ import { verifyByDispatch } from '../../src/modules/verify/verify.js';
 import { CONFIG, FakeGithub, resultZip } from '../helpers/fake-github.js';
 import { toViewModel, type VerifyVM } from '../../src/widgets/lib/view-model.js';
 import { dataOf, manyFindings } from '../helpers/report-fixtures.js';
+
+// These tests exercise the runner and scoring, not the feeds: no KEV/EPSS lookups (the enrichment has its own tests).
+vi.mock('../../src/modules/scanners/enrich.js', async (orig) => ({ ...(await orig<typeof import('../../src/modules/scanners/enrich.js')>()), liveEnrichClients: () => ({}) }));
 
 const load = (name: string): RunnerResult => {
   const r = parseRunnerResult(readFileSync(new URL(`../fixtures/runner/${name}`, import.meta.url), 'utf8'));

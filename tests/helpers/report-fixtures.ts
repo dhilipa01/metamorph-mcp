@@ -2,7 +2,7 @@ import { scoreFindings } from '../../src/modules/assessment/score.js';
 import { assessFull, type Analyzer, type FullAssessment } from '../../src/modules/assessment/assess.js';
 import type { Category, Finding, Severity } from '../../src/modules/assessment/types.js';
 import { buildPlan } from '../../src/modules/planning/plan.js';
-import { buildReportData, type ReportData, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
+import { attachCloud, buildReportData, type ReportCloud, type ReportData, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
 import { writePhpFixture } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 import { runnerResultToSummary } from '../../src/modules/verify/evaluate.js';
@@ -89,7 +89,23 @@ export function dataOf(findings: Finding[], opts: { deps?: ReportDependency[]; r
 // ---- worst-case fixtures ----
 export const long500 = 'a'.repeat(500);
 export const slashes500 = Array.from({ length: 50 }, (_, i) => `dir${i}`).join('/') + '/file.php';
+const cloudBase: ReportCloud = { status: 'scanned', heading: 'Cloud inventory (AWS, read-only)', summary: 'Scanned eu-west-1, us-east-1 (12 lambda, 3 rds); 3 finding(s).', regions: ['eu-west-1', 'us-east-1'], counts: [], findings: [], findingsTotal: 0, moreFindings: 0, notChecked: [], limits: [], note: 'Read-only scan through an assumed role; see docs/AWS_SETUP.md.', generatedAt: NOW };
+export const cloudScanned = (): ReportCloud => ({
+  ...cloudBase,
+  counts: [{ service: 'lambda', count: { value: 12, origin: 'measured' } }, { service: 'rds', count: { value: 3, origin: 'measured' } }],
+  findings: [
+    { id: 'aws-lambda-runtime-eol:old-fn', category: 'cloud', severity: 'high', title: 'Lambda function old-fn runs nodejs18.x; support ended 2025-09-01', evidence: 'lambda eu-west-1 old-fn runtime=nodejs18.x', recommendation: 'Move this function to nodejs24.x.', cwe: [], owasp: [], kev: false, rankReason: 'severity high', source: 'aws-readonly', service: 'lambda', region: 'eu-west-1', resource: 'old-fn' },
+    { id: 'aws-rds-engine-eol:db-1', category: 'cloud', severity: 'medium', title: 'RDS mysql database db-1 runs version 8.0', recommendation: 'Upgrade the engine.', cwe: [], owasp: [], kev: false, rankReason: 'severity medium', source: 'aws-readonly', service: 'rds', region: 'us-east-1', resource: 'db-1' }
+  ],
+  findingsTotal: 3,
+  moreFindings: 1,
+  limits: ['lambda eu-west-1: checked 200, more exist (cap 200)'],
+  notChecked: [{ service: 'eks', region: 'eu-west-1', code: 'AccessDenied', note: 'some resources could not be read' }, { service: 'beanstalk', code: 'NoVerifiedEolSource', note: 'no verified end-of-life data source' }]
+});
+
 export const FIXTURES: Record<string, () => ReportData> = {
+  'cloud section: scanned, with findings, limits and not checked': () => attachCloud(dataOf(manyFindings(8)), cloudScanned()),
+  'cloud section: requested but not configured': () => attachCloud(dataOf(manyFindings(3)), { ...cloudBase, status: 'not-configured', summary: 'A cloud scan was requested, but this server is not set up for it. Nothing from AWS is in this report. See docs/AWS_SETUP.md.', regions: [] }),
   'zero findings': () => dataOf([]),
   '200 findings': () => dataOf(manyFindings(200)),
   '500-char unbroken strings': () => dataOf(manyFindings(30, { title: long500, evidence: long500, id: undefined as unknown as string }).map((f, i) => ({ ...f, id: `${long500}-${i}`, evidence: i % 2 ? slashes500 : long500 })), { repoUrl: `https://github.com/owner/${'r'.repeat(200)}` }),

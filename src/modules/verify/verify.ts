@@ -7,6 +7,7 @@ import { judge, overallStatus, runnerResultToSummary, viewOf, type RunView, type
 import { GithubRunner, RunnerError, isFinal, type RunInfo, type RunState } from './github-runner.js';
 import type { RunnerResult } from './result.js';
 import { analyzeFindings, compareMeasured, type MeasuredComparison } from '../scanners/measured.js';
+import { enrichAnalyses, liveEnrichClients, type EnrichClients, type EnrichmentInfo } from '../scanners/enrich.js';
 
 export const DISPATCH_WAIT_MS = 60_000; // fits the ~120 s tool budget after the repository download and assessment
 export const RESUME_WAIT_MS = 90_000;
@@ -20,10 +21,22 @@ export interface VerifyOutput extends Verdict {
   resume?: { run_id: string; baseline_run_id?: string };
   // Present only when both runs completed and both results were readable. Shown even when the patched build failed or no tests
   // ran: `verified` and `unverifiedReasons` above still decide whether the patch counts as verified, never this score.
-  measured?: MeasuredComparison;
+  measured?: MeasuredComparison & { topFindings: TopFinding[]; feeds: EnrichmentInfo };
   notes: string[];
   hint: string;
 }
+
+/** One of the highest-ranked findings of the patched run: known-exploited first, then severity, then EPSS. */
+export interface TopFinding {
+  id: string;
+  severity: string;
+  title: string;
+  kev?: true;
+  epss?: number;
+  rankReason: string;
+}
+
+export const TOP_FINDINGS = 3;
 
 export interface StagePatch {
   patch: string;
@@ -70,7 +83,7 @@ async function track(runner: GithubRunner, runId: string, waitMs: number): Promi
 
 const errText = (e: unknown): string => (e instanceof RunnerError ? e.message : 'unexpected error while reading the run');
 
-function finish(patched: Tracked | undefined, baseline: Tracked | undefined, base: Pick<VerifyOutput, 'stage' | 'notes'>): VerifyOutput {
+async function finish(patched: Tracked | undefined, baseline: Tracked | undefined, base: Pick<VerifyOutput, 'stage' | 'notes'>, feeds: EnrichClients): Promise<VerifyOutput> {
   const pv: RunView = patched?.view ?? { status: 'failed', error: 'no patched run' };
   // The baseline's check list is left out to keep the result small; its status, build and test counts are enough.
   const { checks: _baselineChecks, ...bv } = baseline?.view ?? ({ status: 'failed', error: 'no baseline run' } as RunView);
@@ -79,8 +92,22 @@ function finish(patched: Tracked | undefined, baseline: Tracked | undefined, bas
   const status = overallStatus([patched?.view, baseline?.view]);
   const ids = { run_id: pv.runId, baseline_run_id: bv.runId };
   const waiting = !isFinal(status);
-  const measured =
-    patched?.result && baseline?.result && patched.view.status === 'completed' && baseline.view.status === 'completed' ? compareMeasured(analyzeFindings(baseline.result), analyzeFindings(patched.result)) : undefined;
+  // Enrichment runs only now, with both results in hand, once for the CVE ids of both runs and under its own time cap (8 s),
+  // so the poll budget of the call is not touched. A feed outage is named in measured.feeds.unavailable.
+  let measured: VerifyOutput['measured'];
+  if (patched?.result && baseline?.result && patched.view.status === 'completed' && baseline.view.status === 'completed') {
+    const { analyses, info } = await enrichAnalyses([analyzeFindings(baseline.result), analyzeFindings(patched.result)], feeds);
+    const [b, p] = analyses;
+    const top = p.findings.slice(0, TOP_FINDINGS).map((f): TopFinding => ({
+      id: f.id,
+      severity: f.severity,
+      title: f.title.length > 100 ? `${f.title.slice(0, 99)}…` : f.title,
+      ...(f.kev === true ? { kev: true as const } : {}),
+      ...(typeof f.epss === 'number' ? { epss: f.epss } : {}),
+      rankReason: f.rankReason ?? `severity ${f.severity}`
+    }));
+    measured = { ...compareMeasured(b, p), topFindings: top, feeds: info };
+  }
   return {
     mode: 'measured',
     status,
@@ -107,7 +134,7 @@ export interface DispatchRequest {
 }
 
 /** Dispatches the patched and baseline runs and waits up to `waitMs` for both. */
-export async function verifyByDispatch(runner: GithubRunner, req: DispatchRequest, waitMs = DISPATCH_WAIT_MS): Promise<VerifyOutput> {
+export async function verifyByDispatch(runner: GithubRunner, req: DispatchRequest, waitMs = DISPATCH_WAIT_MS, feeds: EnrichClients = liveEnrichClients()): Promise<VerifyOutput> {
   const sp = await req.getPatch();
   const [p, b] = await Promise.allSettled([
     runner.dispatch({ repoUrl: req.repoUrl, subfolder: req.subfolder, patch: sp.patch }),
@@ -120,20 +147,20 @@ export async function verifyByDispatch(runner: GithubRunner, req: DispatchReques
       ? track(runner, b.value.runId, waitMs)
       : Promise.resolve({ view: { status: 'failed' as const, error: `baseline dispatch failed: ${errText(b.reason)}` } });
   const [patched, base] = await Promise.all([track(runner, p.value.runId, waitMs), baseline]);
-  return finish(patched, base, { stage: sp.stage, notes });
+  return finish(patched, base, { stage: sp.stage, notes }, feeds);
 }
 
 /** Polls runs started earlier. */
-export async function verifyByRunIds(runner: GithubRunner, ids: { runId?: string; baselineRunId?: string }, waitMs = RESUME_WAIT_MS): Promise<VerifyOutput> {
+export async function verifyByRunIds(runner: GithubRunner, ids: { runId?: string; baselineRunId?: string }, waitMs = RESUME_WAIT_MS, feeds: EnrichClients = liveEnrichClients()): Promise<VerifyOutput> {
   for (const id of [ids.runId, ids.baselineRunId]) {
     if (id !== undefined && !GithubRunner.validRunId(id)) throw new RunnerError('run_id and baseline_run_id must be digits only (the ids from an earlier verify_patch result).');
   }
   const [patched, baseline] = await Promise.all([ids.runId ? track(runner, ids.runId, waitMs) : undefined, ids.baselineRunId ? track(runner, ids.baselineRunId, waitMs) : undefined]);
-  return finish(patched, baseline, { notes: [] });
+  return finish(patched, baseline, { notes: [] }, feeds);
 }
 
 /** Reads finished runs for generate_report and maps them to the report's RunnerSummary. Unfinished or unreadable runs are an error (the caller asked for them). */
-export async function fetchRunnerSummary(runner: GithubRunner, ids: { baseline?: string; patched?: string }): Promise<RunnerSummary> {
+export async function fetchRunnerSummary(runner: GithubRunner, ids: { baseline?: string; patched?: string }, feeds: EnrichClients = liveEnrichClients()): Promise<RunnerSummary> {
   if (!ids.baseline && !ids.patched) throw new RunnerError('runner_run_ids needs a baseline or a patched run id.');
   const read = async (label: string, id: string | undefined): Promise<{ id: string; result: RunnerResult } | undefined> => {
     if (id === undefined) return undefined;
@@ -144,5 +171,9 @@ export async function fetchRunnerSummary(runner: GithubRunner, ids: { baseline?:
     return { id, result: await runner.fetchResult(id) };
   };
   const [b, p] = await Promise.all([read('baseline', ids.baseline), read('patched', ids.patched)]);
-  return runnerResultToSummary({ baseline: b?.result, patched: p?.result, baselineRunId: b?.id, patchedRunId: p?.id });
+  const summary = runnerResultToSummary({ baseline: b?.result, patched: p?.result, baselineRunId: b?.id, patchedRunId: p?.id });
+  if (!summary.measured) return summary;
+  // KEV and EPSS for the distinct CVE ids of the runner findings (fail-soft, 8 s cap); the report ranks with them.
+  const { analyses, info } = await enrichAnalyses([summary.measured.analysis], feeds);
+  return { ...summary, measured: { ...summary.measured, analysis: analyses[0], enrichment: info } };
 }
