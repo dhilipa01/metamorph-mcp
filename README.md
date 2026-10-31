@@ -17,7 +17,7 @@ MCP server that looks at a legacy repo, scores it, plans a staged upgrade, shows
 | `assess_project` | read | Scans a public GitHub repo (Node or PHP), returns a 0-100 score, findings by severity and category. Renders the score dashboard widget |
 | `plan_modernization` | plan | Staged plan for goal `patch_advisory`, `upgrade_runtime` or `modernize_all`. Some stages automated, others guided. Widget |
 | `preview_changes` | read | Read-only. File list and diff for one stage, plus `approvalToken` (guided stages return steps, not a diff) |
-| `generate_report` | read | Always produces three files, no options: PDF, SARIF 2.1.0 and CycloneDX 1.5 SBOM. Returns a signed download link per file (valid 10 minutes), score, counts and page count. Widget with download buttons |
+| `generate_report` | read | Always produces three files, no format option: PDF, SARIF 2.1.0 and CycloneDX 1.5 SBOM. Runner findings (with `runner_run_ids`) are ranked with CISA KEV and EPSS. Optional `include_cloud: true` also scans the configured AWS account read-only and adds a separate Cloud section (see docs/AWS_SETUP.md); AWS is never contacted otherwise. Returns a signed download link per file (valid 10 minutes), score, counts and page count. Widget with download buttons |
 | `apply_stage` | write | Verifies the token, applies the stage to a temp copy, re-scans it, returns patch plus projected score. Widget |
 
 ## Security model

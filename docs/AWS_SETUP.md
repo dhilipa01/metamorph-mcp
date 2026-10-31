@@ -83,6 +83,24 @@ Real responses observed on 2026-10-31: `aws-lambda` (52 runtime ids such as `nod
 (20 cycles such as `1.29`), `amazon-rds-mysql` (cycles `5.7`, `8.0`, `8.4` plus patch releases), `amazon-rds-postgresql` (`9.6` to `18`),
 `amazon-rds-mariadb`, `amazon-linux` (`2023`, `2`, `2018.03`...). No endoflife.date product exists for Elastic Beanstalk (HTTP 404).
 
+## In the report (`generate_report` with `include_cloud`)
+
+`generate_report` never calls AWS by itself. With the optional input `include_cloud: true` it runs the same inventory as
+`cloud_inventory` (same read-only role, caps and scan time budget; the scan budget is shortened to 40 s and the whole cloud step
+is cut off at 45 s so the report still finishes) and adds:
+
+- a PDF section "Cloud inventory (AWS, read-only)": resources per service, ranked findings (with the reason for their position),
+  what was not checked with the AWS error code, and the scan limits;
+- SARIF results for the same findings with `properties.sources: ["aws-readonly"]` and a logical location (resource and region)
+  instead of a file;
+- a source entry for the scan time.
+
+Cloud findings are kept apart: they are not part of the repository score, counts, findings list or runner results. If AWS is not
+set up, the section only says that a cloud scan was requested but is not configured (no variable names or values), and the report
+is produced as usual. If the scan fails or does not finish in time, the section says so with an error code only.
+The connector is tested with fixtures only (see below); this section is covered by the same fixture tests and was not checked
+against a live AWS account.
+
 ## Acceptance check once a real AWS account exists
 
 1. Deploy the stack (step 2) in a test account that has at least one old Lambda runtime.
@@ -91,6 +109,7 @@ Real responses observed on 2026-10-31: `aws-lambda` (52 runtime ids such as `nod
 4. Call it with `{"provider":"aws","regions":["eu-west-1"],"services":["lambda"]}`; confirm only that region and service.
 5. Change `ExternalId` in the stack to a wrong value; confirm the error is a short message with the code `AccessDenied` and no secrets.
 6. Check the server logs contain no key ids, secrets or tokens.
+7. Call `generate_report` for any repository with `include_cloud: true`; confirm the PDF has the Cloud section and the SARIF has results with `aws-readonly` and no file location. Without `include_cloud`, confirm no AWS call is made.
 
 ## Emulator check: not available
 

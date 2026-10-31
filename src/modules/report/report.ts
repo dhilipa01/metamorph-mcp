@@ -108,6 +108,8 @@ export interface ReportSummary {
   findings: { total: number; critical: number; high: number; medium: number; low: number; info: number };
   topFindings: Array<{ severity: string; title: string }>;
   pages: number;
+  /** Only when include_cloud was true: whether the AWS scan ran and how many cloud findings it found (kept apart from `findings`). */
+  cloud?: { status: 'scanned' | 'not-configured' | 'failed'; findings: number };
   files: ReportFile[];
   expiresInMinutes: number;
   message: string;
@@ -198,6 +200,7 @@ export async function generateReport(data: ReportData, links?: LinkProvider, cac
     },
     topFindings: data.findings.slice(0, 3).map((f) => ({ severity: f.severity, title: f.title })),
     pages,
+    ...(data.cloud ? { cloud: { status: data.cloud.status, findings: data.cloud.findingsTotal } } : {}),
     files,
     expiresInMinutes: CACHE_TTL_MS / 60000,
     message
