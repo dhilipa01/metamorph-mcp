@@ -102,3 +102,14 @@ Gaps that decide whether it is usable (added to the critical path):
 
 "Ready" means all of: (a) the acceptance demo passes on 3 repos we did not write, 1 of them private through the GitHub App; (b) on those 3 repos the verified-fix PR builds and tests pass, or the tool says exactly why not; (c) the quality harness (section K) report is published; (d) a person who did not build it completes the quickstart unaided in 5 minutes (the owner can ask one friend to try it; record where they got stuck); (e) README claims match measured results.
 Validation after the freeze, not claimed before: measure time-to-merged-PR against doing it by hand on the same three repos.
+
+## M. Priority order set by the owner (2026-10-31 16:10 IST)
+1. Finish merging the two running agents (assessment accuracy; runner image + PHP version) and deploy.
+2. Then dispatch subagents until WS1, WS2, WS8 and WS12 are DONE (finishing the core). Definition of done per workstream:
+   - WS1 runner: prebuilt image pulled from GHCR; PHP version chosen from the project; `verify_patch` run live once end to end with the owner's token (baseline + patched); flaky tests rerun once and reported as flaky; Node project verified (npm ci/audit/test count parsing exercised on a real repo); phpunit/phpstan exercised with a real project config; runner timeouts resumable by run id.
+   - WS2 report: widget confirmed in Studio (or the unrecognised card shows what Studio sends); SARIF dependency findings carry a location (manifest path) so code-scanning accepts them; SBOM and SARIF validated against the official schemas (fetch blocked before; retry or vendor the schemas with a source note); runner result shown in the report; downloads tied to the requesting key before private repos exist; known limits (fonts for non-Latin text, per-instance cache) stated in the report appendix.
+   - WS8 scanners: runner findings normalised into the shared Finding shape (tool, rule id, CWE/OWASP where defensible), deduplicated across tools, included in score/rank/report as measured; Semgrep offline fallback proven; SonarQube and Snyk pull-mode only if keys exist (otherwise not built, listed as such).
+   - WS12 quality: remaining layers: model-facing evals (tool selection, order, argument sanity, injection text in advisories and repo files), load and resilience (concurrency on /mcp, memory under 500 MiB, timeout behaviour, big repos), security tests (path traversal, symlink, archive bombs, redaction, scope bypass, forged tokens, SSRF through repo_url), conformance gaps (tool annotations, schema errors naming a next step, report output size), CI green on GitHub.
+3. After that, ON THE OWNER'S SAY-SO: WS4 (GitHub connector: branch PR, alerts, GitHub App for private repos), WS5 (Linear, Jira), WS7 (AWS, Azure).
+4. Remaining workstreams (WS6 notify, WS9 modernize orchestrator, WS10 README/DEMO, WS11 vault) only if time remains.
+Freeze: 2026-11-01 12:00 IST.
