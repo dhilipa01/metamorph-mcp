@@ -3,6 +3,7 @@ import { SystemHealthCheck } from './health/system.health.js';
 import { IntakeModule } from './modules/intake/intake.module.js';
 import { AssessmentModule } from './modules/assessment/assessment.module.js';
 import { PlanningModule } from './modules/planning/planning.module.js';
+import { FeedsModule } from './modules/feeds/feeds.module.js';
 
 /**
  * Root Application Module
@@ -27,7 +28,8 @@ import { PlanningModule } from './modules/planning/planning.module.js';
     ConfigModule.forRoot(),
     IntakeModule,
     AssessmentModule,
-    PlanningModule
+    PlanningModule,
+    FeedsModule
   ],
   providers: [
     // Health Checks

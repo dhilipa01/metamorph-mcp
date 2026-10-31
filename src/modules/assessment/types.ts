@@ -9,6 +9,13 @@ export interface Finding {
   title: string; // one line, plain words
   evidence?: string; // short: file, line or value that triggered the rule (never secrets)
   recommendation: string; // one actionable sentence
+  // Optional enrichment (feeds module). Absent when unknown or when a feed was unavailable.
+  cwe?: string[]; // e.g. ["CWE-89"]
+  owasp?: string[]; // OWASP Top 10 2021 ids, e.g. ["A03:2021"]
+  cvss?: number; // CVSS v3 base score 0..10
+  kev?: boolean; // listed in CISA Known Exploited Vulnerabilities (only ever set to true)
+  epss?: number; // EPSS probability 0..1
+  source?: string; // where the enrichment came from, e.g. "osv.dev"
 }
 
 export interface DepRef {

@@ -20,7 +20,7 @@ export interface OsvVuln {
   summary?: string;
   severity?: Array<{ type?: string; score?: string }>;
   affected?: OsvAffected[];
-  database_specific?: { severity?: string };
+  database_specific?: { severity?: string; cwe_ids?: unknown };
 }
 
 export interface OsvClientOptions {
