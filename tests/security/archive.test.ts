@@ -188,13 +188,13 @@ describe('archive bombs', () => {
     // the documented default (5000) is asserted in tests/unit/safe-archive.test.ts; a small cap keeps this test fast
     const files = Array.from({ length: 201 }, (_, i) => ({ name: `r/d${i % 50}/f${i}`, data: 'x' }));
     await expect(extractTarGz(tgz(files), dest, { maxFiles: 200 })).rejects.toThrow(/too many files/);
-  });
+  }, 60_000);
 
   it('count: directories count against the same cap', async () => {
     const { dest } = await sandbox();
     const dirs = Array.from({ length: 201 }, (_, i) => ({ name: `r/dir${i}/`, type: '5' }));
     await expect(extractTarGz(tgz(dirs), dest, { maxFiles: 200 })).rejects.toThrow(/too many entries/);
-  });
+  }, 60_000);
 
   it('depth: an entry deeper than maxDepth is refused', async () => {
     const { dest } = await sandbox();

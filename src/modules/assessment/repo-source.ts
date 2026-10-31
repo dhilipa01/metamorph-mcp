@@ -3,6 +3,15 @@ import { rootManifestGuard } from './assess.js';
 import { promises as fs } from 'node:fs';
 import { archiveUrl, createWorkdir, extractTarGz, fetchArchive, parseGithubRepo, resolveInside } from '../../common/safe-archive.js';
 
+// Unpacking holds the whole decompressed tar in memory (up to 80 MiB, plus parsing). scripts/load.mjs measured 589 MiB peak RSS
+// for three simultaneous near-limit archives against 364 MiB for one, so unpacking runs one at a time; analysis still overlaps.
+let unpackQueue: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+  const run = unpackQueue.then(fn, fn);
+  unpackQueue = run.catch(() => undefined);
+  return run;
+}
+
 export interface RepoMeta {
   // Resolved 40-hex commit sha, read from the pax global header GitHub puts in every codeload tarball.
   commit?: string;
@@ -35,10 +44,10 @@ export async function withRepo<T>(
     }
     let meta: RepoMeta = {};
     try {
-      const r = await extractTarGz(archive, work.dir);
+      const r = await oneAtATime(() => extractTarGz(archive, work.dir));
       meta = r.commit ? { commit: r.commit } : {};
     } catch {
-      throw new Error('The repository archive could not be unpacked safely (too large, too many files, or unexpected content).');
+      throw new Error('The repository archive could not be unpacked safely (too large, too many files, or unexpected content). Try a smaller repository: the limits are 25 MB to download, 80 MiB unpacked and 5,000 files.');
     }
     let root: string;
     try {

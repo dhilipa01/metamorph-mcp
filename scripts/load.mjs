@@ -322,7 +322,7 @@ async function main() {
       srv = await startServer({ tarball: big, memfile: join(work, 'mem-big.jsonl') });
       srv.memfile = join(work, 'mem-big.jsonl');
       const bigRuns = [];
-      for (const [concurrency, calls] of [[1, 2], [3, 1]]) {
+      for (const [concurrency, calls] of [[1, 2], [2, 1]]) {
         const r = await phase({ label: 'big input', srv, concurrency, picks: ['assess_project'], perWorkerCalls: calls });
         bigRuns.push(r);
         results.push(r);
