@@ -33,6 +33,9 @@ const OUTPUT_CAP = Number(cfg('OUTPUT_CAP_BYTES', String(16 * 1024 * 1024)));
 // GitHub caps the whole workflow_dispatch inputs payload at 65,535 characters; leave room for the other inputs.
 const MAX_PATCH_B64_CHARS = Number(cfg('MAX_PATCH_B64_CHARS', '60000'));
 const MAX_FINDINGS = 500;
+// TEST ONLY: absolute path of a directory (bind-mounted into the container) used instead of cloning from GitHub, so a run can
+// happen with `--network none`. Never set by the GitHub workflow. REPO_URL must still be given (it only names the result).
+const LOCAL_REPO_DIR = cfg('LOCAL_REPO_DIR').trim();
 const RULES_DIR = cfg('SEMGREP_RULES_DIR', '/opt/metamorph/rules');
 const RECTOR_FALLBACK = cfg('RECTOR_FALLBACK_CONFIG', '/opt/metamorph/rector.php');
 // PHP versions the image carries: PHP_DEFAULT is `php` on PATH, the others live in PHP_ROOT/<ver>/shim/php.
@@ -216,6 +219,21 @@ function addFinding(tool, f) {
   if (f.path) item.path = clip(relPath(f.path), 500);
   if (Number.isInteger(f.line) && f.line > 0) item.line = f.line;
   if (f.cwe?.length) item.cwe = [...new Set(f.cwe)].slice(0, 10);
+  // Optional identity fields (advisory ids, package, versions). Absent when the tool's output does not carry them.
+  const text = (v, n) => (typeof v === 'string' && v.trim() ? clip(v.trim(), n) : undefined);
+  const setText = (k, v, n) => {
+    const t = text(v, n);
+    if (t) item[k] = t;
+  };
+  setText('package', f.package, 214);
+  setText('installedVersion', f.installedVersion, 100);
+  setText('fixedVersion', f.fixedVersion, 100);
+  setText('affectedVersions', f.affectedVersions, 200);
+  const aliases = [...new Set((f.aliases ?? []).map((a) => text(a, 64)).filter(Boolean))].slice(0, 10);
+  if (aliases.length) item.aliases = aliases;
+  const owasp = [...new Set((f.owasp ?? []).map((a) => text(a, 20)).filter(Boolean))].slice(0, 10);
+  if (owasp.length) item.owasp = owasp;
+  if (typeof f.cvss === 'number' && Number.isFinite(f.cvss) && f.cvss > 0 && f.cvss <= 10) item.cvss = f.cvss;
   allFindings.push(item);
   return sev;
 }
@@ -269,6 +287,9 @@ function sevFromScore(n) {
   return n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : n > 0 ? 'low' : 'info';
 }
 const SEV_WORDS = { critical: 'critical', high: 'high', moderate: 'medium', medium: 'medium', low: 'low', info: 'info', informational: 'info', warning: 'medium', error: 'high', note: 'low', none: 'info', unknown: 'medium' };
+const ADVISORY_ID_RE = /\b(?:CVE-\d{4}-\d{4,}|GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})\b/gi;
+const advisoryIdsOf = (...texts) => [...new Set(texts.flatMap((t) => String(t ?? '').match(ADVISORY_ID_RE) ?? []).map((x) => (x.toUpperCase().startsWith('CVE') ? x.toUpperCase() : `GHSA-${x.slice(5).toLowerCase()}`)))];
+const owaspOf = (...tags) => [...new Set(tags.flatMap((t) => String(t ?? '').match(/\bA(?:0[1-9]|10):2021\b/g) ?? []))];
 const cweOf = (...texts) => [...new Set(texts.flatMap((t) => String(t ?? '').match(/CWE-\d+/gi) ?? []).map((c) => c.toUpperCase()))];
 
 /** Generic SARIF 2.1 -> findings. `override` forces a severity for tools that do not grade (gitleaks). */
@@ -286,9 +307,20 @@ function parseSarif(text, { override } = {}) {
       const severity = override ?? (Number.isFinite(score) ? sevFromScore(score) : tagSev ? SEV_WORDS[tagSev] : (SEV_WORDS[res.level ?? rule.defaultConfiguration?.level ?? 'warning'] ?? 'medium'));
       const loc = res.locations?.[0]?.physicalLocation;
       const message = res.message?.text ?? rule.shortDescription?.text ?? rule.name ?? res.ruleId;
+      const fullMessage = String(message ?? '');
+      // trivy puts "Package: x / Installed Version: y / Fixed Version: z" in the SARIF message text
+      const msgField = (name) => fullMessage.match(new RegExp(`^${name}:[ \\t]*(.+)$`, 'mi'))?.[1]?.trim();
+      const vulnLine = fullMessage.match(/^Vulnerability[ \t]+(\S+)/mi)?.[1];
+      const ids = advisoryIdsOf(res.ruleId ?? rule.id, vulnLine);
       findings.push({
         ruleId: res.ruleId ?? rule.id,
         severity,
+        ...(ids.length ? { aliases: ids } : {}),
+        ...(msgField('Package') ? { package: msgField('Package') } : {}),
+        ...(msgField('Installed Version') ? { installedVersion: msgField('Installed Version') } : {}),
+        ...(msgField('Fixed Version') ? { fixedVersion: msgField('Fixed Version') } : {}),
+        ...(Number.isFinite(score) && score > 0 ? { cvss: score } : {}),
+        owasp: owaspOf(...(props.tags ?? [])),
         title: firstLine(message),
         path: loc?.artifactLocation?.uri?.replace(/^file:\/\//, ''),
         line: loc?.region?.startLine,
@@ -309,11 +341,22 @@ function parseComposerAudit(text) {
     for (const a of Array.isArray(list) ? list : Object.values(list)) {
       // composer's JSON has no CVSS severity for most advisories; it is only used when present.
       const sev = SEV_WORDS[String(a.severity ?? '').toLowerCase()] ?? 'medium';
-      findings.push({ ruleId: a.cve || a.advisoryId || `advisory-${pkg}`, severity: sev, title: `${pkg}: ${a.title ?? 'security advisory'}`, path: 'composer.lock', cwe: cweOf(a.title) });
+      const remote = (Array.isArray(a.sources) ? a.sources : []).map((x) => x?.remoteId);
+      findings.push({
+        ruleId: a.cve || a.advisoryId || `advisory-${pkg}`,
+        severity: sev,
+        title: `${pkg}: ${a.title ?? 'security advisory'}`,
+        path: 'composer.lock',
+        cwe: cweOf(a.title),
+        package: a.packageName || pkg,
+        affectedVersions: a.affectedVersions,
+        // CVE, composer's PKSA id and any GHSA/CVE id the advisory sources list, so other tools' findings can be matched
+        aliases: [...advisoryIdsOf(a.cve, ...remote), ...(a.advisoryId ? [String(a.advisoryId)] : [])]
+      });
     }
   }
   const abandoned = doc.abandoned && !Array.isArray(doc.abandoned) ? doc.abandoned : {};
-  for (const pkg of Object.keys(abandoned)) findings.push({ ruleId: 'abandoned-package', severity: 'low', title: `${pkg} is abandoned`, path: 'composer.json' });
+  for (const pkg of Object.keys(abandoned)) findings.push({ ruleId: 'abandoned-package', severity: 'low', title: `${pkg} is abandoned`, path: 'composer.json', package: pkg });
   return { findings };
 }
 
@@ -327,7 +370,19 @@ function parseNpmAudit(text) {
     if (!direct.length) continue; // transitive-only entries are reported at their source package
     for (const via of direct) {
       const id = String(via.url ?? '').split('/').pop() || String(via.source ?? name);
-      findings.push({ ruleId: id, severity: SEV_WORDS[via.severity] ?? 'medium', title: `${name}: ${via.title ?? 'advisory'}`, path: 'package-lock.json', cwe: (via.cwe ?? []).map(String) });
+      const fix = v.fixAvailable && typeof v.fixAvailable === 'object' && v.fixAvailable.name === name ? v.fixAvailable.version : undefined;
+      findings.push({
+        ruleId: id,
+        severity: SEV_WORDS[via.severity] ?? 'medium',
+        title: `${name}: ${via.title ?? 'advisory'}`,
+        path: 'package-lock.json',
+        cwe: (via.cwe ?? []).map(String),
+        package: via.name || name,
+        affectedVersions: via.range,
+        fixedVersion: fix,
+        aliases: advisoryIdsOf(via.url, id),
+        cvss: via.cvss?.score
+      });
     }
   }
   return { findings };
@@ -513,10 +568,21 @@ async function main() {
   mkdirSync(WORK_DIR, { recursive: true });
   const repoDir = mkdtempSync(join(WORK_DIR, 'repo-'));
   const cloneUrl = `https://github.com/${result.repo}.git`;
-  const clone = await run('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'clone', '--depth', '1', '--single-branch', '--no-tags', '--no-recurse-submodules', cloneUrl, repoDir], { timeoutMs: 300000, cap: 256 * 1024 });
-  result.checks.push({ tool: 'git-clone', version: await toolVersion('git'), status: clone.code === 0 ? 'pass' : 'error', durationMs: clone.durationMs, summary: clone.code === 0 ? 'shallow clone ok' : `clone failed: ${tail(clone.err)}`, counts: {} });
+  let clone;
+  if (LOCAL_REPO_DIR) {
+    // copy (not link) so the mounted directory is never modified; symlinks are not followed
+    try {
+      cpSync(resolve(LOCAL_REPO_DIR), repoDir, { recursive: true, dereference: false, filter: (src) => !src.split(sep).includes('.git') });
+      clone = { code: 0, durationMs: 0, err: '', out: '' };
+    } catch (e) {
+      clone = { code: 1, durationMs: 0, err: String(e?.message ?? e), out: '' };
+    }
+  } else {
+    clone = await run('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'clone', '--depth', '1', '--single-branch', '--no-tags', '--no-recurse-submodules', cloneUrl, repoDir], { timeoutMs: 300000, cap: 256 * 1024 });
+  }
+  result.checks.push({ tool: 'git-clone', version: await toolVersion('git'), status: clone.code === 0 ? 'pass' : 'error', durationMs: clone.durationMs, summary: clone.code === 0 ? (LOCAL_REPO_DIR ? 'local directory copied (test mode, no clone)' : 'shallow clone ok') : `clone failed: ${tail(clone.err)}`, counts: {} });
   if (clone.code !== 0) return;
-  const headRes = await run('git', ['rev-parse', 'HEAD'], { cwd: repoDir, timeoutMs: 10000, cap: 1024 });
+  const headRes = LOCAL_REPO_DIR ? { out: 'local-directory' } : await run('git', ['rev-parse', 'HEAD'], { cwd: repoDir, timeoutMs: 10000, cap: 1024 });
   result.commit = headRes.out.trim().slice(0, 64);
 
   // 2. patch: check first, then apply. A bad patch is a reported result, not a crash.

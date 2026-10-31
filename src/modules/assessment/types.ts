@@ -15,7 +15,8 @@ export interface Finding {
   cvss?: number; // CVSS v3 base score 0..10
   kev?: boolean; // listed in CISA Known Exploited Vulnerabilities (only ever set to true)
   epss?: number; // EPSS probability 0..1
-  source?: string; // where the enrichment came from, e.g. "osv.dev"
+  source?: string; // where the enrichment came from, e.g. "osv.dev"; for runner findings the tool name and version, e.g. "trivy 0.76.1"
+  sources?: string[]; // runner findings only: every tool that reported this (deduplicated) finding, e.g. ["trivy", "composer-audit"]
   rankReason?: string; // why it sits where it does in the ranking (rank.ts), max 80 chars; set by assessFull
   // 'low': the finding rests on a guessed version (dependency range, no lockfile). The score counts it at half weight (score.ts).
   confidence?: 'low';

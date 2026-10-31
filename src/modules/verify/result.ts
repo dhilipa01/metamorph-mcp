@@ -27,7 +27,16 @@ export const ResultFindingSchema = z.object({
   title: short(200),
   path: short(500).optional(),
   line: z.number().int().min(1).max(10_000_000).optional(),
-  cwe: z.array(short(32)).max(RESULT_LIMITS.cwe).optional()
+  cwe: z.array(short(32)).max(RESULT_LIMITS.cwe).optional(),
+  // Optional identity fields added for WS8 (older results do not carry them): advisory ids (CVE, GHSA, PKSA), the affected
+  // package, versions, OWASP Top 10 2021 ids the tool itself listed, and a CVSS score when the tool gave one.
+  aliases: z.array(short(64)).max(RESULT_LIMITS.cwe).optional(),
+  package: short(214).optional(),
+  installedVersion: short(100).optional(),
+  fixedVersion: short(100).optional(),
+  affectedVersions: short(200).optional(),
+  owasp: z.array(short(20)).max(RESULT_LIMITS.cwe).optional(),
+  cvss: z.number().min(0).max(10).optional()
 });
 
 // PHP version the runner chose for composer and phpunit, and why. Optional: older results do not carry it.

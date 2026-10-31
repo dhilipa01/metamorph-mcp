@@ -9,6 +9,8 @@ import { inventoryPhp } from '../assessment/php-inventory.js';
 import type { Category, DependencyFix, Finding, ModernizationPlan, Severity } from '../assessment/types.js';
 import { rankFindings, rankReason } from '../assessment/rank.js';
 import type { ApplyResult } from '../planning/apply.js';
+import { MEASURED_ORIGIN, SCORES_DIFFER_NOTE, type MeasuredAnalysis, type MeasuredSummary } from '../scanners/measured.js';
+import type { DedupeCounts } from '../scanners/dedupe.js';
 
 export type Origin = 'measured' | 'projected' | 'reported';
 
@@ -37,6 +39,9 @@ export interface RunnerSummary {
   tests?: { ran: number; passed: number; failed: number };
   // PHP version the runner chose and why (result.json `php` block), when the project is PHP.
   php?: { selected?: string; version?: string; constraint?: string; constraintSource: string; reason: string; supported: boolean; lockRegenerated?: boolean };
+  // WS8: findings the runner tools reported, normalised and deduplicated (scanners/), with the measured score. `basis` says which
+  // run the list and score come from (the patched run when there is one). baseline/patched hold both runs' summaries when both exist.
+  measured?: { basis: 'patched' | 'baseline'; analysis: MeasuredAnalysis; baseline?: MeasuredSummary; patched?: MeasuredSummary };
 }
 
 // Optional feed provenance: which outside sources were consulted and when.
@@ -67,6 +72,42 @@ export interface ReportFinding {
   rankReason: string; // why it sits at this position: KEV first, then severity, then EPSS
   source?: string;
   project?: string; // folder of the project the finding belongs to (multi-project runs); absent for single-project and repo-wide
+}
+
+// A finding the runner tools reported. `sources` lists every tool that reported it (after deduplication).
+export interface ReportMeasuredFinding extends ReportFinding {
+  sources: string[];
+  package?: string;
+  aliases: string[];
+  fixedVersion?: string;
+  severityNote?: string; // set only when the tools disagreed, e.g. "composer-audit: medium; trivy: high (strongest kept)"
+}
+
+export const MAX_MEASURED_FINDINGS = 500;
+
+export interface ReportMeasuredRun {
+  score: Labelled<number>;
+  distinct: number;
+  reported: number;
+  perTool: Array<{ tool: string; reported: number }>;
+}
+
+export interface ReportMeasured {
+  origin: typeof MEASURED_ORIGIN;
+  basis: 'patched' | 'baseline';
+  score: Labelled<number>; // measured, from the deduplicated runner findings
+  scoreByCategory: Array<{ category: Category; score: Labelled<number> }>;
+  counts: Array<{ severity: Severity; count: Labelled<number> }>;
+  dedupe: DedupeCounts;
+  perTool: Array<{ tool: string; version?: string; status?: string; reported: number; uniqueOnly: number }>;
+  notListed: number; // findings the runner counted but did not list; not in the score
+  baseline?: ReportMeasuredRun; // set only when both runs exist
+  patched?: ReportMeasuredRun;
+  staticScore: Labelled<number>; // the static assessment score of the same report, shown next to it
+  findings: ReportMeasuredFinding[]; // ranked, deduplicated, at most MAX_MEASURED_FINDINGS
+  omitted: number; // deduplicated findings beyond MAX_MEASURED_FINDINGS
+  note: string; // states that the two scores differ in what they cover
+  staticCheck?: { packagesInBoth: string[]; advisoriesConfirmed: number };
 }
 
 export interface ReportDependency {
@@ -131,6 +172,7 @@ export interface ReportData {
   // Text of the manifest and lockfiles (package.json, package-lock.json, composer.json, composer.lock; paths relative to the
   // analysed folder) so SARIF can point at the line that declares a package. Never rendered into the PDF.
   manifests?: Record<string, string>;
+  measured?: ReportMeasured;
   tools: Array<{ name: string; version: string }>;
   sources: Array<{ name: string; url?: string; fetchedAt: string }>; // fetchedAt: ISO time, "unavailable" (feed was down) or "not recorded"
 }
@@ -246,6 +288,53 @@ function runnerTools(runner: RunnerSummary | undefined): ReportData['tools'] {
   return (runner?.tools ?? []).map((t) => ({ name: cleanText(t.name, 80), version: cleanText(t.version, 40) }));
 }
 
+function severityNote(by: Record<string, Severity> | undefined): string | undefined {
+  if (!by) return undefined;
+  return `${Object.entries(by).sort().map(([t, sv]) => `${cleanText(t, 40)}: ${sv}`).join('; ')} (strongest kept)`;
+}
+
+function runOf(x: MeasuredSummary): ReportMeasuredRun {
+  return {
+    score: { value: x.score, origin: 'measured', source: MEASURED_ORIGIN },
+    distinct: x.distinct,
+    reported: x.reported,
+    perTool: x.perTool.map((t) => ({ tool: cleanText(t.tool, 64), reported: t.reported }))
+  };
+}
+
+function measuredOf(m: NonNullable<RunnerSummary['measured']>, staticScore: number): ReportMeasured {
+  const a = m.analysis;
+  const lab = (n: number): Labelled<number> => ({ value: n, origin: 'measured', source: MEASURED_ORIGIN });
+  const listed = a.findings.slice(0, MAX_MEASURED_FINDINGS).map((f): ReportMeasuredFinding => {
+    const base = toReportFinding(f);
+    const note = severityNote(f.severityBySource);
+    return {
+      ...base,
+      sources: f.sources.map((x) => cleanText(x, 64)).filter(Boolean).slice(0, 12),
+      ...(opt(f.package, 214) ? { package: opt(f.package, 214) } : {}),
+      aliases: f.aliases.map((x) => cleanText(x, 64)).filter(Boolean).slice(0, 10),
+      ...(opt(f.fixedVersion, 100) ? { fixedVersion: opt(f.fixedVersion, 100) } : {}),
+      ...(note ? { severityNote: note } : {})
+    };
+  });
+  return {
+    origin: MEASURED_ORIGIN,
+    basis: m.basis,
+    score: lab(a.score.overall),
+    scoreByCategory: (Object.keys(a.score.byCategory) as Category[]).map((c) => ({ category: c, score: lab(a.score.byCategory[c]) })),
+    counts: (['critical', 'high', 'medium', 'low', 'info'] as Severity[]).map((s) => ({ severity: s, count: lab(a.score.counts[s]) })),
+    dedupe: { ...a.dedupe },
+    perTool: a.perTool.map((t) => ({ tool: cleanText(t.tool, 64), ...(t.version ? { version: cleanText(t.version, 40) } : {}), ...(t.status ? { status: t.status } : {}), reported: t.reported, uniqueOnly: t.uniqueOnly })),
+    notListed: a.notListed,
+    ...(m.baseline && m.patched ? { baseline: runOf(m.baseline), patched: runOf(m.patched) } : {}),
+    staticScore: { value: staticScore, origin: 'measured', source: 'Metamorph static assessment' },
+    findings: listed,
+    omitted: Math.max(0, a.findings.length - listed.length),
+    note: SCORES_DIFFER_NOTE,
+    ...(a.staticCheck ? { staticCheck: a.staticCheck } : {})
+  };
+}
+
 const CHECK_STATUS = new Set(['passed', 'failed', 'skipped']);
 
 // Internal seam for the verification runner: the owner calls this with the runner's validated result once it exists
@@ -255,7 +344,7 @@ export function attachRunnerResult(data: ReportData, summary: RunnerSummary): Re
   if (typeof summary?.runner !== 'string' || !Array.isArray(summary.checks) || summary.checks.some((c) => !CHECK_STATUS.has(c?.status))) {
     throw new TypeError('Invalid runner summary: expected a runner name and checks with status passed, failed or skipped.');
   }
-  return { ...data, verification: verificationOf(summary), tools: [...data.tools, ...runnerTools(summary)] };
+  return { ...data, verification: verificationOf(summary), tools: [...data.tools, ...runnerTools(summary)], ...(summary.measured ? { measured: measuredOf(summary.measured, data.score.value) } : {}) };
 }
 
 export interface BuildReportInput {
@@ -350,6 +439,7 @@ export function buildReportData(input: BuildReportInput): ReportData {
       remaining: r.remaining.length
     })),
     ...(runner ? { verification: verificationOf(runner) } : {}),
+    ...(runner?.measured ? { measured: measuredOf(runner.measured, a.score.overall) } : {}),
     tools,
     manifests: manifestsFromFiles(full.files),
     sources: [...sourceMap.values()]

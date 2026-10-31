@@ -140,6 +140,8 @@ export interface VerifyVM {
   baseline: RunVM;
   checks: Array<{ tool: string; status: CheckStatus }>;
   checkCount: number;
+  // Measured score (runner tools) of the baseline and patched runs, when both completed. Never read as verification.
+  measured?: { baseline: number; patched: number; delta: number; baselineFindings: number; patchedFindings: number; note?: string };
   hint?: string;
 }
 
@@ -308,8 +310,17 @@ function toVerify(o: Record<string, unknown>): VerifyVM {
     baseline: run(o.baseline),
     checks,
     checkCount: Math.max(checksAll, checks.length, count(patched.checkCount)),
+    measured: measuredOf(o.measured),
     hint: str(o.hint)
   };
+}
+
+function measuredOf(raw: unknown): VerifyVM['measured'] {
+  if (!isObj(raw) || !isObj(raw.baseline) || !isObj(raw.patched)) return undefined;
+  const b = pct(raw.baseline.score);
+  const p = pct(raw.patched.score);
+  if (b === undefined || p === undefined) return undefined;
+  return { baseline: b, patched: p, delta: p - b, baselineFindings: count(raw.baseline.distinct), patchedFindings: count(raw.patched.distinct), note: str(raw.note) };
 }
 
 function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>): AssessmentVM {
