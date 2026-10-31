@@ -4,6 +4,7 @@ import { handleReportDownload, registerReportRoutes, reportRoutesActive, type Re
 import { publicBase, linkProvider } from '../../src/modules/report/links.js';
 import { sha256, keyIdOf, authorize } from '../../src/common/auth/keys.js';
 import { ReportCache } from '../../src/modules/report/report.js';
+import { dataOf, manyFindings } from '../helpers/report-fixtures.js';
 
 const SECRET = 'a'.repeat(32);
 const ID = 'a1b2c3d4e5f60718293a4b5c';
@@ -215,5 +216,52 @@ describe('key id from the guard', () => {
     expect(keyIdOf(table[0])).toBe(keyIdOf({ hash: sha256(KEY) }));
     expect(keyIdOf({ hash: sha256('another-key-0001') })).not.toBe(keyIdOf(table[0]));
     expect(JSON.stringify(a)).not.toContain(KEY);
+  });
+});
+
+describe('generateReport ownership and guard key id', () => {
+  const data = dataOf(manyFindings(2));
+  it('records the owner on the cache entry, and two keys get different ids for identical input', async () => {
+    const { generateReport } = await import('../../src/modules/report/report.js');
+    const cache = new ReportCache();
+    const a = await generateReport(data, undefined, cache, 'aaaaaaaaaaaa');
+    const b = await generateReport(data, undefined, cache, 'bbbbbbbbbbbb');
+    expect(a.reportId).not.toBe(b.reportId);
+    expect(cache.ownerOf(a.reportId)).toBe('aaaaaaaaaaaa');
+    expect(cache.ownerOf(b.reportId)).toBe('bbbbbbbbbbbb');
+    expect(cache.ownerOf('f'.repeat(24))).toBeUndefined();
+    const anon = await generateReport(data, undefined, cache);
+    expect(cache.ownerOf(anon.reportId)).toBe('anon');
+  });
+  it("end to end: the link issued for key A opens only A's report", async () => {
+    const { generateReport } = await import('../../src/modules/report/report.js');
+    const cache = new ReportCache();
+    const now = Math.floor(Date.now() / 1000);
+    const mk = (kid: string) => linkProvider({ secret: SECRET, publicUrl: 'https://m.example.com', routesActive: true, keyId: kid });
+    const a = await generateReport(data, mk('aaaaaaaaaaaa'), cache, 'aaaaaaaaaaaa');
+    const b = await generateReport(data, mk('bbbbbbbbbbbb'), cache, 'bbbbbbbbbbbb');
+    const tokenOf = (url?: string) => new URL(url as string).searchParams.get('t');
+    const fileOf = (r: typeof a) => r.files.find((f) => f.format === 'sarif')!;
+    const d = { cache, secret: SECRET, now: () => now };
+    expect(call(`${a.reportId}.sarif`, { t: tokenOf(fileOf(a).downloadUrl) }, d).code).toBe(200);
+    // A's token against B's report id: the signature covers the id, so it fails
+    expect(call(`${b.reportId}.sarif`, { t: tokenOf(fileOf(a).downloadUrl) }, d).code).toBe(403);
+    // a token validly signed for B's id but carrying A's key id is refused by the owner check
+    expect(call(`${b.reportId}.sarif`, { t: signDownloadToken({ id: b.reportId, ext: 'sarif', kid: 'aaaaaaaaaaaa' }, SECRET, now) }, d).code).toBe(403);
+    expect(call(`${b.reportId}.sarif`, { t: tokenOf(fileOf(b).downloadUrl) }, d).code).toBe(200);
+  });
+  it('requestKeyId: anon when auth is off, the guard-recorded id otherwise, and it refuses to guess', async () => {
+    const { requestKeyId } = await import('../../src/common/auth/scope.guard.js');
+    const saved = process.env.METAMORPH_AUTH;
+    try {
+      process.env.METAMORPH_AUTH = 'off';
+      expect(requestKeyId({})).toBe('anon');
+      delete process.env.METAMORPH_AUTH;
+      expect(requestKeyId({ auth: { claims: { keyId: 'abcdef012345' } } })).toBe('abcdef012345');
+      for (const bad of [{}, { auth: {} }, { auth: { claims: { keyId: 'anon' } } }, { auth: { claims: { keyId: 'not-hex-id!!' } } }]) expect(() => requestKeyId(bad as never)).toThrow(/could not identify/);
+    } finally {
+      if (saved === undefined) delete process.env.METAMORPH_AUTH;
+      else process.env.METAMORPH_AUTH = saved;
+    }
   });
 });

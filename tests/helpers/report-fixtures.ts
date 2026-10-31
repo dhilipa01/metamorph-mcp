@@ -4,6 +4,34 @@ import type { Category, Finding, Severity } from '../../src/modules/assessment/t
 import { buildPlan } from '../../src/modules/planning/plan.js';
 import { buildReportData, type ReportData, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
 import { writePhpFixture } from './fixtures.js';
+import { readFileSync } from 'node:fs';
+import { runnerResultToSummary } from '../../src/modules/verify/evaluate.js';
+import { parseRunnerResult, type RunnerResult } from '../../src/modules/verify/result.js';
+
+// A runner fixture from tests/fixtures/runner/<name> as a validated result (optionally with fields overridden).
+export function runnerFixture(name: string, override: Partial<RunnerResult> = {}): RunnerResult {
+  const parsed = parseRunnerResult(readFileSync(new URL(`../fixtures/runner/${name}`, import.meta.url), 'utf8'));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return { ...parsed.result, ...override };
+}
+
+// ReportData whose Verification comes from a runner result evaluated by the same code verify_patch uses.
+export function dataWithRunner(patched?: RunnerResult, baseline?: RunnerResult): ReportData {
+  return dataOf(manyFindings(4), { runner: runnerResultToSummary({ patched, baseline, patchedRunId: patched ? '2002' : undefined, baselineRunId: baseline ? '1001' : undefined }) });
+}
+
+// A green result: build ok, tests ran and passed, nothing else wrong.
+export function greenRunnerResult(): RunnerResult {
+  const base = runnerFixture('php-shop-after.json');
+  return {
+    ...base,
+    patchApplied: true,
+    buildOk: true,
+    tests: { ran: 12, passed: 12, failed: 0 },
+    checks: base.checks.map((c) => (['composer-install', 'composer-audit', 'phpunit'].includes(c.tool) ? { ...c, status: 'pass' as const } : c)),
+    php: { selected: '8.3', version: '8.3.9', constraint: '^8.3', constraintSource: 'require.php', reason: 'lowest installed version satisfying ^8.3', supported: true, lockRegenerated: false }
+  };
+}
 
 // Shared report fixtures: used by the layout tests and by the PDF/UA validation test.
 export const NOW = '2026-10-31T12:00:00.000Z';
@@ -65,6 +93,8 @@ export const FIXTURES: Record<string, () => ReportData> = {
   'zero findings': () => dataOf([]),
   '200 findings': () => dataOf(manyFindings(200)),
   '500-char unbroken strings': () => dataOf(manyFindings(30, { title: long500, evidence: long500, id: undefined as unknown as string }).map((f, i) => ({ ...f, id: `${long500}-${i}`, evidence: i % 2 ? slashes500 : long500 })), { repoUrl: `https://github.com/owner/${'r'.repeat(200)}` }),
+  'runner: not verified (php-shop, lock regenerated)': () => dataWithRunner(runnerFixture('php-shop-after-php74.json'), runnerFixture('php-shop-before.json')),
+  'runner: verified': () => dataWithRunner(greenRunnerResult(), runnerFixture('php-shop-before.json')),
   'unicode, RTL and emoji': () =>
     dataOf(manyFindings(12, { title: 'Привет мир Ελληνικά שלום עולם مرحبا بالعالم 你好世界 😀🔥 é café', evidence: 'src/日本語/файл.php:3', recommendation: '‮evil‬ RTL override and 🚀' })),
   'control characters': () =>
