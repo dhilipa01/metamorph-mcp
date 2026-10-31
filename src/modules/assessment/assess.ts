@@ -2,14 +2,45 @@
 import { canonicalHash } from '../../common/approval-token.js';
 import { analyzePackages, type PackageAnalysis, type Severity as OsvSeverity } from '../intake/advisory.js';
 import type { PackageRef } from '../intake/osv.client.js';
+import { EolClient } from '../feeds/eol.js';
+import { EpssClient } from '../feeds/epss.js';
+import { classifyRule, owaspForCwes } from '../feeds/standards.js';
 import { readKeyFiles } from './files.js';
 import { detectHosting } from './hosting.js';
 import { inventoryNode, nodeFindings, NODE_EOL } from './node-inventory.js';
-import { inventoryPhp, phpFindings, scanPhpSources } from './php-inventory.js';
+import { inventoryPhp, phpFindings, PHP_EOL, scanPhpSources } from './php-inventory.js';
 import { scoreFindings, topFindings, type Score } from './score.js';
 import type { DependencyFix, DepRef, Finding, Severity } from './types.js';
 
 export type Analyzer = (packages: PackageRef[]) => Promise<PackageAnalysis[]>;
+// EPSS lookup by CVE id (probability 0..1). Optional enrichment: a failure adds nothing.
+export type EpssLookup = (cves: string[]) => Promise<Map<string, number>>;
+// Live end-of-life check for a release cycle. Returns the EOL date when that cycle is already past its end of support.
+export type EolLookup = (product: 'php' | 'nodejs', cycle: string) => Promise<{ eolDate: string; latest: string } | undefined>;
+
+export interface AssessOptions {
+  analyze?: Analyzer;
+  today?: Date;
+  epss?: EpssLookup;
+  eol?: EolLookup;
+}
+
+const MAX_EPSS_CVES = 50;
+
+export function liveEpss(client: EpssClient = new EpssClient()): EpssLookup {
+  return async (cves) => new Map((await client.getScores(cves)).map((s) => [s.cve, s.epss]));
+}
+
+export function liveEol(client: EolClient = new EolClient()): EolLookup {
+  return async (product, cycle) => {
+    const c = await client.tryCheck(product, cycle);
+    return c && c.isEol && typeof c.eol === 'string' ? { eolDate: c.eol, latest: c.latest } : undefined;
+  };
+}
+
+function cvesOf(f: { id: string; aliases: string[] }): string[] {
+  return [f.id, ...f.aliases].filter((a) => /^CVE-\d{4}-\d{4,}$/.test(a));
+}
 
 export interface Assessment {
   assessmentId: string;
@@ -45,7 +76,7 @@ function toRefs(deps: DepRef[], ecosystem: PackageRef['ecosystem']): PackageRef[
   return deps.map((d) => ({ name: d.name, ecosystem, version: d.version }));
 }
 
-function dependencyFindings(analyses: PackageAnalysis[], approx: Map<string, boolean>): Finding[] {
+function dependencyFindings(analyses: PackageAnalysis[], approx: Map<string, boolean>, epss: Map<string, number> = new Map()): Finding[] {
   const out: Finding[] = [];
   for (const a of analyses) {
     if (!a.affected || a.findings.length === 0) continue;
@@ -53,14 +84,51 @@ function dependencyFindings(analyses: PackageAnalysis[], approx: Map<string, boo
     const urgent = a.findings.some((f) => f.urgent);
     const fixed = top.fixedVersions[0];
     const approximate = approx.get(`${a.package.ecosystem}:${a.package.name}`) === true;
+    // Enrichment only ever adds facts we actually have; missing data leaves the fields off.
+    const cwe = top.cwes ?? [];
+    const owasp = owaspForCwes(cwe);
+    const scores = cvesOf(top).map((c) => epss.get(c)).filter((n): n is number => n !== undefined);
+    const kev = a.findings.some((f) => f.urgentReasons.includes('known_exploited'));
     out.push({
       id: `dep-vulnerable:${a.package.name}`,
       category: 'dependencies',
       severity: OSV_TO_FINDING[top.severity],
       title: `${a.package.name}@${a.package.version} has ${a.findings.length}${a.truncated ? '+' : ''} known advisories${urgent ? ' (urgent)' : ''}`,
       evidence: `${top.id}${approximate ? ' (version is approximate: no lockfile)' : ''}`,
-      recommendation: fixed ? `Upgrade ${a.package.name} to ${fixed} or later.` : `Check ${top.id} for a fixed release of ${a.package.name}.`
+      recommendation: fixed ? `Upgrade ${a.package.name} to ${fixed} or later.` : `Check ${top.id} for a fixed release of ${a.package.name}.`,
+      ...(cwe.length > 0 ? { cwe } : {}),
+      ...(owasp.length > 0 ? { owasp } : {}),
+      ...(top.cvss !== undefined ? { cvss: top.cvss } : {}),
+      ...(kev ? { kev: true } : {}),
+      ...(scores.length > 0 ? { epss: Math.max(...scores) } : {}),
+      source: 'osv.dev'
     });
+  }
+  return out;
+}
+
+// Adds CWE / OWASP ids for our own rules where a defensible mapping exists. Never overrides data already on the finding.
+function withStandards(f: Finding): Finding {
+  if (f.cwe) return f;
+  const c = classifyRule(f.id);
+  if (c.cwe.length === 0) return f;
+  return { ...f, cwe: c.cwe, ...(c.owasp.length > 0 ? { owasp: c.owasp } : {}) };
+}
+
+async function extraEolFindings(nodeMajor: number | undefined, phpMinor: string | undefined, lookup: EolLookup | undefined): Promise<Finding[]> {
+  if (!lookup) return [];
+  const out: Finding[] = [];
+  try {
+    if (nodeMajor !== undefined && NODE_EOL[nodeMajor] === undefined) {
+      const r = await lookup('nodejs', String(nodeMajor));
+      if (r) out.push({ id: 'node-runtime-eol', category: 'runtime', severity: 'high', title: `Node.js ${nodeMajor} is past end of life`, evidence: `Node ${nodeMajor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Move to the current maintained LTS (Node 22 or 24).', source: 'endoflife.date' });
+    }
+    if (phpMinor !== undefined && PHP_EOL[phpMinor] === undefined) {
+      const r = await lookup('php', phpMinor);
+      if (r) out.push({ id: 'php-version-eol', category: 'runtime', severity: 'high', title: `PHP ${phpMinor} no longer receives security fixes`, evidence: `PHP ${phpMinor} ended ${r.eolDate} (endoflife.date)`, recommendation: 'Raise the PHP requirement to a version that still receives security support.', source: 'endoflife.date' });
+    }
+  } catch {
+    // feed trouble never fails an assessment
   }
   return out;
 }
@@ -104,13 +172,16 @@ function dependencyFixes(analyses: PackageAnalysis[], dev: Map<string, boolean>)
   return out.sort((x, y) => Number(y.urgent) - Number(x.urgent) || x.name.localeCompare(y.name));
 }
 
-export async function assessDirectory(dir: string, opts: { analyze?: Analyzer; today?: Date } = {}): Promise<Assessment> {
+export async function assessDirectory(dir: string, opts: AssessOptions = {}): Promise<Assessment> {
   return (await assessFull(dir, opts)).assessment;
 }
 
-export async function assessFull(dir: string, opts: { analyze?: Analyzer; today?: Date } = {}): Promise<FullAssessment> {
+export async function assessFull(dir: string, opts: AssessOptions = {}): Promise<FullAssessment> {
   const today = opts.today ?? new Date();
   const analyze: Analyzer = opts.analyze ?? ((pkgs) => analyzePackages(pkgs));
+  // Live feeds are the default only when OSV is live too; an injected analyzer means a test or offline run.
+  const epssLookup = opts.epss ?? (opts.analyze ? undefined : liveEpss());
+  const eolLookup = opts.eol ?? (opts.analyze ? undefined : liveEol());
   const kf = await readKeyFiles(dir);
   const c = kf.contents;
   const findings: Finding[] = [];
@@ -126,6 +197,9 @@ export async function assessFull(dir: string, opts: { analyze?: Analyzer; today?
 
   if (nodeInv) findings.push(...nodeFindings(nodeInv, today));
   if (phpInv) findings.push(...phpFindings(phpInv, today), ...scanPhpSources(kf.php));
+
+  // Extra EOL signal: only for versions the checked-in tables do not know (they stay the offline source of truth).
+  findings.push(...(await extraEolFindings(nodeInv?.minNodeMajor, phpInv?.minPhp, eolLookup)));
 
   const todayIso = today.toISOString().slice(0, 10);
   const hosting = detectHosting(kf.paths, c, { isNodeMajorEol: (major) => (NODE_EOL[major] ?? '9999') < todayIso });
@@ -152,9 +226,20 @@ export async function assessFull(dir: string, opts: { analyze?: Analyzer; today?
       findings.push({ id: 'osv-unavailable', category: 'dependencies', severity: 'info', title: 'Vulnerability data was unavailable', recommendation: 'Run analyze_advisory again later to check the dependencies.' });
     }
   }
-  findings.push(...dependencyFindings(analyses, approx));
+  let epss = new Map<string, number>();
+  if (epssLookup) {
+    const cves = [...new Set(analyses.filter((a) => a.affected && a.findings.length > 0).flatMap((a) => cvesOf(a.findings[0])))].slice(0, MAX_EPSS_CVES);
+    if (cves.length > 0) {
+      try {
+        epss = await epssLookup(cves);
+      } catch {
+        // EPSS down: findings simply carry no epss field
+      }
+    }
+  }
+  findings.push(...dependencyFindings(analyses, approx, epss));
 
-  const sorted = groupByRule(findings).sort((a, b) => RANK[b.severity] - RANK[a.severity] || a.id.localeCompare(b.id));
+  const sorted = groupByRule(findings.map(withStandards)).sort((a, b) => RANK[b.severity] - RANK[a.severity] || a.id.localeCompare(b.id));
   const stack = nodeInv && phpInv ? 'mixed' : nodeInv ? 'node' : phpInv ? 'php' : 'unknown';
   const vulnerable = analyses.filter((a) => a.affected).length;
   const urgent = analyses.filter((a) => a.findings.some((f) => f.urgent)).length;

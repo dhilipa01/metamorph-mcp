@@ -12,6 +12,8 @@ export interface AdvisoryFinding {
   fixedVersions: string[];
   urgent: boolean;
   urgentReasons: UrgentReason[];
+  cvss?: number; // CVSS v3 base score when OSV carries a vector or number
+  cwes?: string[]; // from GHSA database_specific.cwe_ids, when present
 }
 
 export interface PackageAnalysis {
@@ -102,6 +104,24 @@ function cvss3Score(vector: string): number | undefined {
   return roundUp(Math.min(changed ? 1.08 * (impact + expl) : impact + expl, 10));
 }
 
+// Highest numeric CVSS v3 score OSV gives for this record (vector or plain number).
+export function cvssScoreOf(v: OsvVuln): number | undefined {
+  let best: number | undefined;
+  for (const s of Array.isArray(v.severity) ? v.severity : []) {
+    if (typeof s?.score !== 'string') continue;
+    const n = /^\d+(\.\d+)?$/.test(s.score) ? Number(s.score) : cvss3Score(s.score);
+    if (n !== undefined && n > 0 && n <= 10 && (best === undefined || n > best)) best = n;
+  }
+  return best;
+}
+
+function cweIdsOf(v: OsvVuln): string[] {
+  const raw = v.database_specific?.cwe_ids;
+  return (Array.isArray(raw) ? raw : [])
+    .filter((c): c is string => typeof c === 'string' && /^CWE-\d{1,5}$/.test(c))
+    .slice(0, 5);
+}
+
 export function mapSeverity(v: OsvVuln): Severity {
   const label = typeof v.database_specific?.severity === 'string' ? v.database_specific.severity.toUpperCase() : '';
   if (label === 'CRITICAL') return 'critical';
@@ -136,6 +156,8 @@ export function fixedVersionsFor(v: OsvVuln, p: PackageRef): string[] {
 
 export function toFinding(v: OsvVuln, p: PackageRef, kev: Set<string>): AdvisoryFinding {
   const severity = mapSeverity(v);
+  const cvss = cvssScoreOf(v);
+  const cwes = cweIdsOf(v);
   const aliases = (Array.isArray(v.aliases) ? v.aliases : [])
     .filter((a): a is string => typeof a === 'string')
     .map((a) => cleanText(a, 40))
@@ -151,7 +173,9 @@ export function toFinding(v: OsvVuln, p: PackageRef, kev: Set<string>): Advisory
     summary: cleanText(v.summary),
     fixedVersions: fixedVersionsFor(v, p),
     urgent: reasons.length > 0,
-    urgentReasons: reasons
+    urgentReasons: reasons,
+    ...(cvss !== undefined ? { cvss } : {}),
+    ...(cwes.length > 0 ? { cwes } : {})
   };
 }
 
