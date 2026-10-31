@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
-import { scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM } from '../../lib/view-model';
+import { scoreBand, toViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
 import './dashboard.css';
 
 const R = 52;
@@ -435,6 +435,69 @@ function Report({ vm, open }: { vm: ReportVM; open: (url: string) => void }) {
   );
 }
 
+const RUN_LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed', timed_out: 'Timed out' };
+
+function RunLine({ label, r }: { label: string; r: RunVM }) {
+  const t = r.tests;
+  return (
+    <div className="fact">
+      <dt>{label}</dt>
+      <dd>
+        {RUN_LABEL[r.status]}
+        {r.buildOk !== undefined && <> · build {r.buildOk ? 'ok' : 'not ok'}</>}
+        {t && <> · tests {t.ran === 0 ? 'none found' : `${t.passed}/${t.ran} passed`}</>}
+      </dd>
+    </div>
+  );
+}
+
+function Verify({ vm }: { vm: VerifyVM }) {
+  return (
+    <>
+      <div className="card">
+        <div className="chips" style={{ marginTop: 0 }}>
+          <span className={`chip ${vm.status === 'completed' ? 'neutral' : vm.status === 'running' || vm.status === 'queued' ? 'guided' : 'high'}`}>{RUN_LABEL[vm.status]}</span>
+          <span className={`chip ${vm.verified ? 'low' : 'high'}`}>{vm.verified ? 'Verified' : 'Not verified'}</span>
+        </div>
+        {vm.stage && <p className="meta" style={{ marginTop: 8 }}>Stage: {vm.stage}</p>}
+        <p className="meta" style={{ marginTop: 8 }}>Measured on an isolated runner, not projected.</p>
+      </div>
+      {!vm.verified && vm.reasons.length > 0 && (
+        <section aria-labelledby="sd-why">
+          <h2 id="sd-why">Why not verified ({vm.reasonCount})</h2>
+          <ul className="card plain">
+            {vm.reasons.map((r, i) => (
+              <li key={`${r}-${i}`}>{r}</li>
+            ))}
+          </ul>
+          {vm.reasonCount > vm.reasons.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.reasons.length} of {vm.reasonCount}.</p>}
+        </section>
+      )}
+      <section className="card" aria-labelledby="sd-runs">
+        <h2 id="sd-runs">Before and after</h2>
+        <dl className="facts">
+          <RunLine label="Baseline (before)" r={vm.baseline} />
+          <RunLine label="Patched (after)" r={vm.patched} />
+        </dl>
+      </section>
+      {vm.checks.length > 0 && (
+        <section aria-labelledby="sd-checks">
+          <h2 id="sd-checks">Checks ({vm.checkCount})</h2>
+          <ul className="card plain">
+            {vm.checks.map((c, i) => (
+              <li key={`${c.tool}-${i}`}>
+                <span className={`chip ${c.status === 'pass' ? 'low' : c.status === 'skipped' ? 'neutral' : 'high'}`}>{c.status}</span> <span className="mono">{c.tool}</span>
+              </li>
+            ))}
+          </ul>
+          {vm.checkCount > vm.checks.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.checks.length} of {vm.checkCount}.</p>}
+        </section>
+      )}
+      {vm.hint && <p className="meta" style={{ marginTop: 12 }}>{vm.hint}</p>}
+    </>
+  );
+}
+
 function Projection({ from, to }: { from?: number; to?: number }) {
   if (to === undefined) return null;
   return (
@@ -539,7 +602,7 @@ export default function ScoreDashboardPage() {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
-  const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'plan' ? 'Modernization plan' : vm.kind === 'apply' ? 'Projected result' : 'Modernization score';
+  const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'verify' ? 'Verification' : vm.kind === 'plan' ? 'Modernization plan' : vm.kind === 'apply' ? 'Projected result' : 'Modernization score';
 
   return (
     <main className="sd" aria-busy={!isReady}>
@@ -562,6 +625,8 @@ export default function ScoreDashboardPage() {
         <Report vm={vm} open={open} />
       ) : vm.kind === 'apply' ? (
         <Apply vm={vm} />
+      ) : vm.kind === 'verify' ? (
+        <Verify vm={vm} />
       ) : (
         <Assessment vm={vm} />
       )}

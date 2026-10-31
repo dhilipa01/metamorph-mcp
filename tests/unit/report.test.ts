@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_PAGES, MAX_PDF_BYTES, NO_RUNNER_SENTENCE, PAGE_MARGIN, renderPdf, safeText } from '../../src/modules/report/pdf.js';
-import { INLINE_LIMIT_BYTES, ReportCache, generateReport, lookupResource, reportUri } from '../../src/modules/report/report.js';
+import { INLINE_LIMIT_BYTES, INLINE_TOTAL_BYTES, ReportCache, generateReport, lookupResource, reportUri } from '../../src/modules/report/report.js';
 import { linkProvider } from '../../src/modules/report/links.js';
 import { buildReportData, cleanText, type ReportDependency, type RunnerSummary } from '../../src/modules/report/report-data.js';
 import { buildSarif, locationOf } from '../../src/modules/report/sarif.js';
@@ -311,8 +311,11 @@ describe('cache and tool result', () => {
     for (const f of res.files) {
       expect(f.downloadUrl).toBeUndefined();
       expect(f.downloadPath).toMatch(/^\/reports\/[a-f0-9]{24}\.[a-z.]+\?t=/);
-      if (f.bytes < INLINE_LIMIT_BYTES) expect(f.inline).toBeDefined();
+      if (f.inline) expect(f.bytes).toBeLessThan(INLINE_LIMIT_BYTES);
     }
+    const total = res.files.reduce((n, f) => n + (f.inline?.data.length ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(INLINE_TOTAL_BYTES);
+    expect(JSON.stringify(res).length).toBeLessThan(INLINE_TOTAL_BYTES + 12_000); // the text the model reads stays small
     expect(res.message).toContain('METAMORPH_PUBLIC_URL');
     const pdf = res.files.find((f) => f.format === 'pdf')?.inline;
     if (pdf) expect(Buffer.from(pdf.data, 'base64').subarray(0, 5).toString()).toBe('%PDF-');

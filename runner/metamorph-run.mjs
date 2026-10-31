@@ -3,13 +3,14 @@
 // WARNING: this executes UNTRUSTED project code (installs without scripts, project tests, scanners).
 // Run it only inside the runner container or a GitHub Actions ephemeral VM, never in the MCP server.
 //
-// Inputs (env or --name=value args): REPO_URL, SUBFOLDER, PATCH_B64, CHECKS, plus optional
+// Inputs (env or --name=value args): REPO_URL, SUBFOLDER, PATCH_B64 or PATCH_GZ_B64 (gzip then base64), CHECKS, plus optional
 //   OUT_FILE (default /out/result.json), WORK_DIR (default /work), CHECK_TIMEOUT_S (default 600),
 //   INSTALL_TIMEOUT_S (default 900), OUTPUT_CAP_BYTES (default 16 MiB), MAX_PATCH_B64_CHARS (default 60000).
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { gunzipSync } from 'node:zlib';
 
 // ---------- config ----------
 const argv = Object.fromEntries(
@@ -20,6 +21,8 @@ const cfg = (name, def = '') => argv[name] ?? argv[name.toLowerCase().replace(/_
 const REPO_URL = cfg('REPO_URL').trim();
 const SUBFOLDER = cfg('SUBFOLDER').trim();
 const PATCH_B64 = cfg('PATCH_B64').replace(/\s+/g, '');
+const PATCH_GZ_B64 = cfg('PATCH_GZ_B64').replace(/\s+/g, '');
+const MAX_PATCH_BYTES = Number(cfg('MAX_PATCH_BYTES', String(8 * 1024 * 1024))); // decompressed size cap (gzip bomb guard)
 const CHECKS_ARG = cfg('CHECKS', 'all').trim() || 'all';
 const OUT_FILE = cfg('OUT_FILE', '/out/result.json');
 const WORK_DIR = cfg('WORK_DIR', '/work');
@@ -428,15 +431,27 @@ function fail(msg) {
   console.error(`[runner] ${msg}`);
 }
 
+let patchBuf; // decoded patch bytes, set by validateInputs
 function validateInputs() {
   const m = REPO_URL.match(/^https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/);
   if (!m) return 'REPO_URL must be an https://github.com/<owner>/<repo> URL';
   result.repo = `${m[1]}/${m[2]}`;
   if (SUBFOLDER && (!/^[A-Za-z0-9._\-/ ]+$/.test(SUBFOLDER) || SUBFOLDER.split('/').includes('..') || SUBFOLDER.startsWith('/'))) return 'SUBFOLDER must be a relative path without ".."';
-  if (PATCH_B64.length > MAX_PATCH_B64_CHARS) {
-    return `PATCH_B64 is ${PATCH_B64.length} characters, over the ${MAX_PATCH_B64_CHARS} limit (GitHub workflow_dispatch allows 65,535 characters for all inputs combined). Send a smaller patch or run the Docker image locally.`;
+  if (PATCH_B64 && PATCH_GZ_B64) return 'Send either PATCH_B64 or PATCH_GZ_B64, not both';
+  const encoded = PATCH_GZ_B64 || PATCH_B64;
+  const name = PATCH_GZ_B64 ? 'PATCH_GZ_B64' : 'PATCH_B64';
+  // The cap applies to the characters actually sent, i.e. after compression.
+  if (encoded.length > MAX_PATCH_B64_CHARS) {
+    return `${name} is ${encoded.length} characters, over the ${MAX_PATCH_B64_CHARS} limit (GitHub workflow_dispatch allows 65,535 characters for all inputs combined). Next step: ${PATCH_GZ_B64 ? 'split the change into smaller stages' : 'send the patch gzip-compressed as PATCH_GZ_B64 (gzip, then base64)'}, or run the Docker image locally.`;
   }
-  if (PATCH_B64 && !/^[A-Za-z0-9+/]*={0,2}$/.test(PATCH_B64)) return 'PATCH_B64 is not valid base64';
+  if (encoded && !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return `${name} is not valid base64`;
+  if (PATCH_GZ_B64) {
+    try {
+      patchBuf = gunzipSync(Buffer.from(PATCH_GZ_B64, 'base64'), { maxOutputLength: MAX_PATCH_BYTES });
+    } catch {
+      return `PATCH_GZ_B64 is not valid gzip data or expands beyond ${MAX_PATCH_BYTES} bytes`;
+    }
+  } else if (PATCH_B64) patchBuf = Buffer.from(PATCH_B64, 'base64');
   return '';
 }
 
@@ -500,9 +515,9 @@ async function main() {
   result.commit = headRes.out.trim().slice(0, 64);
 
   // 2. patch: check first, then apply. A bad patch is a reported result, not a crash.
-  if (PATCH_B64) {
+  if (patchBuf) {
     const patchFile = join(mkdtempSync(join(tmpdir(), 'mm-patch-')), 'change.diff');
-    const buf = Buffer.from(PATCH_B64, 'base64');
+    const buf = patchBuf;
     writeFileSync(patchFile, buf);
     const gitApply = (extra) => run('git', ['-c', 'core.hooksPath=/dev/null', 'apply', '--whitespace=nowarn', ...extra, patchFile], { cwd: repoDir, timeoutMs: 60000, cap: 64 * 1024 });
     const chk = await gitApply(['--check']);

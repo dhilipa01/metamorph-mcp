@@ -16,10 +16,11 @@ on because composer, npm, trivy and semgrep need it; that is a known residual ri
 | `REPO_URL` | `https://github.com/<owner>/<repo>` only. Cloned shallow, no submodules, no hooks. |
 | `SUBFOLDER` | Project folder inside the repo (optional, no `..`). |
 | `PATCH_B64` | Optional base64 unified diff, paths relative to the repo root (plain `git diff` output). `git apply --check` runs first; a patch that does not apply gives `patchApplied:false` and a failed `git-apply` check, and nothing else runs. |
+| `PATCH_GZ_B64` | Preferred. The same diff, gzip-compressed and then base64 encoded (`gzip -9c fix.diff \| base64 -w0`). Send this or `PATCH_B64`, not both. Decompressed size is capped (`MAX_PATCH_BYTES`, default 8 MiB). |
 | `CHECKS` | Comma list, default `all`. Ids: `composer-install, composer-audit, phpunit, phpstan, rector, npm-ci, npm-audit, eslint, tsc, npm-test, trivy, semgrep, gitleaks, checkov, hadolint`. Aliases: `php, composer, npm, node, scanners, light` (light = everything except trivy, semgrep, checkov, rector). |
 
 Optional env: `OUT_FILE` (default `/out/result.json`), `CHECK_TIMEOUT_S` (600), `INSTALL_TIMEOUT_S` (900),
-`OUTPUT_CAP_BYTES` (16 MiB per check), `MAX_PATCH_B64_CHARS` (60000).
+`OUTPUT_CAP_BYTES` (16 MiB per check), `MAX_PATCH_B64_CHARS` (60000, applies to the characters sent, i.e. after compression), `MAX_PATCH_BYTES` (8 MiB, decompressed).
 
 ## Local use
 
@@ -71,9 +72,12 @@ The fallback rules are deliberately few; they are a safety net, not a replacemen
 ephemeral VM, then uploads `result.json` as the `metamorph-result` artifact (retention 3 days).
 
 **Input size limit.** GitHub documents that the whole `workflow_dispatch` inputs payload can contain at most
-**65,535 characters** (and at most 25 inputs). `patch_b64` shares that budget with the other inputs, so the script
-refuses `PATCH_B64` longer than 60,000 characters with a clear message (about 45 KB of raw diff, base64 is 4/3 larger).
-Larger patches must use the local Docker route or a future artifact/URL based hand-off.
+**65,535 characters** (and at most 25 inputs). The patch shares that budget with the other inputs, so the script
+refuses a `PATCH_GZ_B64` or `PATCH_B64` longer than 60,000 characters (the cap applies after compression). The message
+says the next step: send `PATCH_GZ_B64` (gzip, then base64) if you used `PATCH_B64`, or split the change into smaller
+stages / run the Docker image locally if you already compressed. A real regenerated `composer.lock` patch for the demo
+(58,729 bytes of diff, 78,308 base64 characters uncompressed) compresses to 7,760 characters with gzip -9 plus base64.
+The workflow also takes `request_id`, which appears in the run name so a dispatcher can find its run.
 
 ## Measured
 

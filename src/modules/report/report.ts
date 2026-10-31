@@ -11,9 +11,11 @@ export const FORMATS: readonly ReportFormat[] = ['pdf', 'sarif', 'sbom'];
 
 // Hard ceiling for embedding any file in the tool result (MCP payloads are JSON, base64 adds about 33%).
 export const EMBED_LIMIT_BYTES = 1024 * 1024;
-// A widget tool's result is also its structuredContent AND the text the model reads, so inline copies are stricter:
-// only as a fallback when no absolute download link exists, per file below 256 KB.
-export const INLINE_LIMIT_BYTES = Math.min(EMBED_LIMIT_BYTES, 256 * 1024);
+// With @Widget the SDK sets structuredContent to the handler's return value and the model-facing text is the JSON of that
+// same value; the two cannot be separated. So inline copies are tiny: only as a fallback when no absolute download link
+// exists, each file below 24 KB and at most 32 KB of encoded data in total (a typical PDF never fits; use the resource).
+export const INLINE_LIMIT_BYTES = 24 * 1024;
+export const INLINE_TOTAL_BYTES = 32 * 1024;
 export const CACHE_MAX_ENTRIES = 5;
 export const CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -158,9 +160,14 @@ export async function generateReport(data: ReportData, links?: LinkProvider, cac
   });
   if (!absolute) {
     // No clickable link: put small files inline so the user can still save them (see INLINE_LIMIT_BYTES).
-    for (const f of files) {
+    let budget = INLINE_TOTAL_BYTES;
+    for (const f of [...files].sort((x, y) => x.bytes - y.bytes)) {
       const a = artifacts.find((x) => x.format === f.format) as Artifact;
-      if (a.data.length < INLINE_LIMIT_BYTES) f.inline = a.format === 'pdf' ? { encoding: 'base64', data: a.data.toString('base64') } : { encoding: 'utf8', data: a.data.toString('utf8') };
+      if (a.data.length >= INLINE_LIMIT_BYTES) continue;
+      const inline: ReportFile['inline'] = a.format === 'pdf' ? { encoding: 'base64', data: a.data.toString('base64') } : { encoding: 'utf8', data: a.data.toString('utf8') };
+      if (inline.data.length > budget) continue;
+      budget -= inline.data.length;
+      f.inline = inline;
     }
   }
   const lines = files.map((f) => `${f.label} (${Math.round(f.bytes / 1024)} KB): ${f.downloadUrl ?? f.downloadPath ?? f.uri}`);

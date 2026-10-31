@@ -223,7 +223,9 @@ async function writeChanged(dir: string, before: Record<string, string>, after: 
   }
 }
 
-export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<ApplyResult> {
+// Plan, stage and patches for an approved stage, with every check apply_stage makes: configured secret, known and
+// automated stage, something to change, and an approval token bound to the plan hash, patch hash and stage index.
+export async function resolveApprovedStage(dir: string, opts: ApplyOptions): Promise<{ full: FullAssessment; plan: ModernizationPlan; stage: PlanStage; patches: FilePatch[]; assess: AssessOptions }> {
   if (typeof opts.secret !== 'string' || opts.secret.length < MIN_SECRET_LEN) throw new Error(NOT_CONFIGURED);
   const assess: AssessOptions = { analyze: opts.analyze, today: opts.today };
   const full = await assessFull(dir, assess);
@@ -240,7 +242,11 @@ export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<
 
   const check = checkApproval(opts.token, { planHash: canonicalHash(plan), patchHash: canonicalHash(patches), stage: stage.index }, opts.secret, opts.now);
   if (!check.ok) throw new Error(check.message);
+  return { full, plan, stage, patches, assess };
+}
 
+export async function applyStageInDir(dir: string, opts: ApplyOptions): Promise<ApplyResult> {
+  const { full, stage, patches, assess } = await resolveApprovedStage(dir, opts);
   return projectStage(dir, full, stage, patches, assess);
 }
 

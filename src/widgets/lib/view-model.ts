@@ -10,8 +10,10 @@ export const MAX_REMAINING = 5;
 export const MAX_FILES = 10;
 export const MAX_REPORT_FILES = 3;
 export const MAX_REPORT_FINDINGS = 3;
-// Largest inline (base64 or text) copy the widget will turn into a Blob link. Matches the server's INLINE_LIMIT_BYTES.
-export const MAX_INLINE_BYTES = 256 * 1024;
+// Largest inline (base64 or text) copy the widget will turn into a Blob link. Matches the server's INLINE_LIMIT_BYTES (the text the model reads contains it too).
+export const MAX_INLINE_BYTES = 24 * 1024;
+export const MAX_CHECKS = 12;
+export const MAX_REASONS = 6;
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Risk = 'low' | 'medium' | 'high';
@@ -116,11 +118,36 @@ export interface ReportVM {
   message?: string;
 }
 
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timed_out';
+export type CheckStatus = 'pass' | 'fail' | 'error' | 'skipped';
+
+export interface RunVM {
+  status: RunStatus;
+  runId?: string;
+  buildOk?: boolean;
+  patchApplied?: boolean;
+  tests?: { ran: number; passed: number; failed: number };
+}
+
+export interface VerifyVM {
+  kind: 'verify';
+  status: RunStatus;
+  verified: boolean;
+  reasons: string[];
+  reasonCount: number;
+  stage?: string;
+  patched: RunVM;
+  baseline: RunVM;
+  checks: Array<{ tool: string; status: CheckStatus }>;
+  checkCount: number;
+  hint?: string;
+}
+
 export interface EmptyVM {
   kind: 'empty';
 }
 
-export type ViewModel = AssessmentVM | PlanVM | ApplyVM | ReportVM | EmptyVM;
+export type ViewModel = AssessmentVM | PlanVM | ApplyVM | VerifyVM | ReportVM | EmptyVM;
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 const RISKS: Risk[] = ['low', 'medium', 'high'];
@@ -232,6 +259,49 @@ function toApply(o: Record<string, unknown>, before: number, after: number): App
     files,
     fileCount: Math.max(filesAll, files.length),
     note: str(o.note)
+  };
+}
+
+const RUN_STATUSES: RunStatus[] = ['queued', 'running', 'completed', 'failed', 'timed_out'];
+const CHECK_STATUSES: CheckStatus[] = ['pass', 'fail', 'error', 'skipped'];
+
+function run(raw: unknown): RunVM {
+  const o = isObj(raw) ? raw : {};
+  const t = isObj(o.tests) ? o.tests : undefined;
+  return {
+    status: oneOf(o.status, RUN_STATUSES, 'failed'),
+    runId: str(o.runId),
+    buildOk: typeof o.buildOk === 'boolean' ? o.buildOk : undefined,
+    patchApplied: typeof o.patchApplied === 'boolean' ? o.patchApplied : undefined,
+    tests: t ? { ran: count(t.ran), passed: count(t.passed), failed: count(t.failed) } : undefined
+  };
+}
+
+// verify_patch output. `verified` is true only when the tool says so AND no reason is listed: a green label can never
+// come from a missing field or from a reason list that was dropped.
+function toVerify(o: Record<string, unknown>): VerifyVM {
+  const reasonsAll = Array.isArray(o.unverifiedReasons) ? o.unverifiedReasons.length : 0;
+  const reasons = strList(o.unverifiedReasons, MAX_REASONS);
+  const patched = isObj(o.patched) ? o.patched : {};
+  const checksAll = Array.isArray(patched.checks) ? patched.checks.length : 0;
+  const checks = list(patched.checks, MAX_CHECKS, (c) => {
+    if (!isObj(c)) return undefined;
+    const tool = str(c.tool);
+    return tool ? { tool, status: oneOf(c.status, CHECK_STATUSES, 'error') } : undefined;
+  });
+  const st = isObj(o.stage) ? o.stage : undefined;
+  return {
+    kind: 'verify',
+    status: oneOf(o.status, RUN_STATUSES, 'failed'),
+    verified: o.verified === true && reasonsAll === 0 && run(o.patched).status === 'completed',
+    reasons,
+    reasonCount: Math.max(reasonsAll, reasons.length),
+    stage: st ? (str(st.title) ?? str(st.id)) : undefined,
+    patched: run(o.patched),
+    baseline: run(o.baseline),
+    checks,
+    checkCount: Math.max(checksAll, checks.length, count(patched.checkCount)),
+    hint: str(o.hint)
   };
 }
 
@@ -362,6 +432,7 @@ export function toViewModel(output: unknown): ViewModel {
         hint: str(o.hint)
       };
     }
+    if (o.mode === 'measured' && typeof o.verified === 'boolean' && isObj(o.patched)) return toVerify(o);
     const before = pct(o.scoreBefore);
     const after = pct(o.scoreAfter);
     if (before !== undefined && after !== undefined && (o.mode === 'projected' || (isObj(o.stage) && Array.isArray(o.files)))) {

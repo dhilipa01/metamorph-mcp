@@ -294,3 +294,20 @@ describe('toViewModel report (generate_report output)', () => {
     expect([formatBytes(12), formatBytes(2048), formatBytes(3 * 1024 * 1024)]).toEqual(['12 B', '2 KB', '3.0 MB']);
   });
 });
+
+describe('kind detection: no kind shadows another', () => {
+  const verify = { mode: 'measured', status: 'completed', verified: true, unverifiedReasons: [], patched: { status: 'completed', checks: [{ tool: 'tests', status: 'pass' }] }, baseline: { status: 'completed' } };
+  const report = { reportId: 'a1b2c3d4e5f60718293a4b5c', score: { overall: 52, origin: 'measured' }, files: [], findings: { total: 0 } };
+  const apply = { stage: { id: 's' }, files: [], mode: 'projected', scoreBefore: 1, scoreAfter: 2 };
+  const samples: Array<[string, unknown]> = [['verify', verify], ['report', report], ['assessment', assessment], ['plan', plan], ['apply', apply]];
+  it.each(samples)('%s is recognised as itself', (kind, sample) => {
+    expect(toViewModel(sample).kind).toBe(kind);
+    expect(toViewModel(JSON.stringify(sample)).kind).toBe(kind);
+  });
+  it('a report that also carries verify-like or plan-like fields stays a report', () => {
+    expect(toViewModel({ ...report, verified: true, mode: 'measured', patched: {}, stages: [] }).kind).toBe('report');
+  });
+  it('a verify result with a score field is not an assessment', () => {
+    expect(toViewModel({ ...verify, score: { overall: 10 } }).kind).toBe('verify');
+  });
+});
