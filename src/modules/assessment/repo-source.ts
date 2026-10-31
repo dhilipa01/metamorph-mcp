@@ -1,5 +1,6 @@
 import type { ExecutionContext } from '@nitrostack/core';
 import { rootManifestGuard } from './assess.js';
+import { promises as fs } from 'node:fs';
 import { archiveUrl, createWorkdir, extractTarGz, fetchArchive, parseGithubRepo, resolveInside } from '../../common/safe-archive.js';
 
 export interface RepoMeta {
@@ -42,6 +43,7 @@ export async function withRepo<T>(
     let root: string;
     try {
       root = await resolveInside(work.dir, subfolder ?? '');
+      if (!(await fs.stat(root)).isDirectory()) throw new Error('not a directory'); // a missing or file subfolder must not reach the analysis (its errors name server paths)
     } catch {
       throw new Error('The subfolder is not valid. Use a path inside the repository, like apps/api.');
     }
