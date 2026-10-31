@@ -187,21 +187,27 @@ function isNonEmpty(x: unknown): x is string {
   return typeof x === 'string' && x.length > 0;
 }
 
+// Raw OSV records for one package -> the small analysis the rest of the server uses.
+export function analysisFor(p: PackageRef, records: OsvVuln[], kev: Set<string>): PackageAnalysis {
+  const all = records.filter((v) => v && isNonEmpty(v.id)).map((v) => toFinding(v, p, kev)).sort(bySeverity);
+  return {
+    package: { name: p.name, ecosystem: p.ecosystem, version: p.version },
+    affected: all.length > 0,
+    findings: all.slice(0, MAX_FINDINGS),
+    truncated: all.length > MAX_FINDINGS
+  };
+}
+
+export async function loadKev(deps: AdvisoryDeps): Promise<Set<string>> {
+  return safeKev(deps);
+}
+
 export async function analyzePackages(packages: PackageRef[], deps: AdvisoryDeps = {}): Promise<PackageAnalysis[]> {
   assertPackageList(packages);
   const client = deps.client ?? new OsvClient();
   const kev = await safeKev(deps);
   const out: PackageAnalysis[] = [];
-  for (const p of packages) {
-    const vulns = (await client.queryPackage(p)).filter((v) => v && isNonEmpty(v.id));
-    const all = vulns.map((v) => toFinding(v, p, kev)).sort(bySeverity);
-    out.push({
-      package: { name: p.name, ecosystem: p.ecosystem, version: p.version },
-      affected: all.length > 0,
-      findings: all.slice(0, MAX_FINDINGS),
-      truncated: all.length > MAX_FINDINGS
-    });
-  }
+  for (const p of packages) out.push(analysisFor(p, await client.queryPackage(p), kev));
   return out;
 }
 

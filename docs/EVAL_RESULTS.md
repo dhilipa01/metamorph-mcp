@@ -20,14 +20,14 @@ Not covered by this layer: `check_watch` output size (feeds are stubbed offline)
 
 ## 2. Ground truth (`tests/eval/ground-truth.test.ts`)
 
-71 planted problems, each in its own small project, run through the real `assessFull` with an injected offline advisory feed (invented advisory ids, no network). 6 clean fixtures must produce zero findings. Recall is per rule: planted found / planted. A planted problem counts as found only if the finding carries the right rule id, the right file (and line for PHP smells), and for dependencies the right fixed version in the proposed fix.
+77 planted problems, each in its own small project, run through the real `assessFull` with an injected offline advisory feed (invented advisory ids, no network). 8 clean fixtures must produce zero findings. Recall is per rule: planted found / planted. A planted problem counts as found only if the finding carries the right rule id, the right file (and line for PHP smells), and for dependencies the right fixed version in the proposed fix.
 
 | Rule | Planted | Found | Recall |
 |---|---|---|---|
-| php-mysql-removed-api | 3 | 3 | 1.00 |
+| php-mysql-removed-api | 4 | 4 | 1.00 |
 | php-sql-concatenation | 4 | 4 | 1.00 |
 | php-eval | 3 | 3 | 1.00 |
-| php-weak-password-hash | 3 | 2 | **0.67** |
+| php-weak-password-hash | 4 | 4 | 1.00 |
 | php-unserialize-input | 2 | 2 | 1.00 |
 | php-dynamic-include | 3 | 3 | 1.00 |
 | php-extract-input | 2 | 2 | 1.00 |
@@ -44,16 +44,17 @@ Not covered by this layer: `check_watch` output size (feeds are stubbed offline)
 | docker-latest-tag | 2 | 2 | 1.00 |
 | docker-runs-as-root, no-container-packaging, no-ci | 1 each | 1 each | 1.00 |
 | dep-vulnerable (npm lockfile, npm range, npm dev, Packagist lock, Packagist exact pin) | 7 | 7 | 1.00 |
-| hardcoded-secret-in-source (no such rule) | 2 | 0 | **0.00** |
-| ci-risky-workflow (no such rule) | 2 | 0 | **0.00** |
+| hardcoded-secret-in-source | 4 | 4 | 1.00 |
+| ci-pr-target-checkout | 2 | 2 | 1.00 |
+| ci-action-unpinned-branch | 2 | 2 | 1.00 |
 
-Overall: 66 of 71 planted problems found (93%). The 5 misses are 1 weak-password-hash spelling, 2 hard-coded secrets and 2 risky CI workflows. False positives: 1 on 6 clean fixtures.
+Overall: 77 of 77 planted problems found. False positives: 0 on 8 clean fixtures. Before this round it was 66 of 71 (93%) with 1 false positive on 6 clean fixtures; the 4 gaps and the false positive listed then are fixed (the `it.fails` tests became ordinary tests, `KNOWN_GAPS` is empty):
+1. `php-weak-password-hash` now also fires when md5/sha1 is applied to a password-like name (`pass`, `pwd`, a bare `pw`), so `md5($_POST['pwd'])` and `sha1($pw)` are caught. Clean fixture: `md5_file`, `sha1($name . '/v2')`, `md5(json_encode(...))` stay silent.
+2. `php-mysql-removed-api` skips a `function mysql_*(` definition (a call on the same line still counts).
+3. New rule `hardcoded-secret-in-source` (AWS access key id `AKIA` + 16 characters, private key block, GitHub token `ghp_`/`github_pat_`). Reports file:line and the key TYPE only; the ground-truth suite asserts the secret text appears nowhere in the result. Ids ending in `EXAMPLE` (the documented AWS example keys) are ignored; documentation (`.md`, `.txt`) is not scanned. CWE-798 (A07:2021).
+4. New rules `ci-pr-target-checkout` (pull_request_target plus a checkout of the PR head ref or repository) and `ci-action-unpinned-branch` (`uses: owner/repo@main|master|develop|dev|trunk|HEAD|latest`). Both map to CWE-829 (A08:2021).
 
-Known gaps (the tests for these run as `it.fails`: they pass while the gap exists and fail the day it is fixed, which forces this list to be updated):
-1. **php-weak-password-hash misses `md5($_POST['pwd'])`.** The rule requires the text "pass" on the same line, so any other variable name (`$pwd`, `$secret`, `$pw`) is missed.
-2. **php-mysql-removed-api false positive on a method definition.** `public function mysql_query_count(): int` is reported as a use of the removed `mysql_*` API. The lookbehind excludes `->`, `::`, `$` and word characters but not the `function ` keyword, so compatibility shims that define such names are flagged.
-3. **No rule for secrets in source** (AWS-style access key, private key literal): 0 of 2 found. The only secret check is a committed `.env`.
-4. **No rule for risky CI content** (`pull_request_target` with a PR-head checkout, actions on a moving branch): 0 of 2 found. The only CI checks are "no CI config found" and the Docker rules.
+The new fixtures were written by the same people as the rules, so recall 1.00 shows the rules do what they say, not that they find what real code contains. Precision of the three new rule families on real repositories was not labelled by hand.
 
 Clean fixtures with zero findings (passing): the modern PHP shop, a modern Node service, a PHP 8.4 file full of comments and strings that mention `mysql_query($_GET)`, `md5($password)`, `extract($_POST)` and the dynamic-code function, safe lookalikes (`$this->mysql_query()`, a static method with the dynamic-code name, `password_hash`, `unserialize(file_get_contents())`), a repo with GitLab CI, a digest-pinned multi-stage Dockerfile and env templates (`.env.example`, `.sample`, `.template`, `.dist`), and a Node 24 repo with Jenkins. The fixed versions of the planted dependencies produce no `dep-vulnerable` finding.
 
@@ -62,32 +63,32 @@ Limits of this layer: the fixtures are written by the same people who wrote the 
 ## 3. Real-world corpus (`npm run eval`)
 
 <!-- corpus:start -->
-Run date 2026-10-31, Metamorph commit 26524fac417c, Node v20.20.2. Live OSV, EPSS and endoflife.date feeds (no stubs). Corpus: eval/corpus.json (20 repositories, pinned to full commit shas).
+Run date 2026-10-31, Metamorph commit c924a8d600b1, Node v20.20.2. Live OSV, EPSS and endoflife.date feeds (no stubs). Corpus: eval/corpus.json (20 repositories, pinned to full commit shas).
 
-Summary: {"total":20,"assessed":20,"skippedOverLimit":0,"errors":0,"medianScore":59,"minScore":0,"maxScore":96,"withLockfileCrossCheck":7,"wallSecondsTotal":314,"maxPeakRssMiB":125}
+Summary: {"total":20,"assessed":20,"skippedOverLimit":0,"errors":0,"medianScore":58,"minScore":0,"maxScore":83,"withLockfileCrossCheck":7,"wallSecondsTotal":123,"maxPeakRssMiB":127}
 
 | Repo | Kind | Size KB | Stack | Score | Findings crit/high/med/low/info | Deps total/vulnerable | Independent audit (lockfile repos) | Seconds | Peak RSS MiB | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| silexphp/Silex | php | 3661 | php | 0 | 4/5/4/4/1 | 31/13 | no lockfile | 20.3 | 98 | score 0 |
-| zendframework/ZendSkeletonApplication | php | 2954 | php | 79 | 0/1/1/2/1 | 4/0 | no lockfile | 5.2 | 99 |  |
-| BootstrapCMS/CMS | php | 7420 | mixed | 26 | 1/3/1/4/2 | 19/2 | composer 2 direct / 17 all | 19.3 | 108 |  |
-| kohana/kohana | php | 1244 | php | 77 | 0/1/1/3/2 | 2/1 | no lockfile | 4.9 | 100 |  |
-| Hifone/Hifone | php | 3691 | mixed | 2 | 1/4/3/5/1 | 41/6 | composer 4 direct / 17 all | 59.4 | 110 |  |
-| codecasts/spa-starter-kit | php | 1136 | php | 79 | 0/1/1/2/0 | 0/0 | no lockfile | 7.2 | 102 | no dependencies found at the repo root: manifests may be in subfolders, so this score may be false comfort |
-| wardrobecms/wardrobe-archived | php | 594 | php | 64 | 1/0/1/3/1 | 2/1 | no lockfile | 4.5 | 100 |  |
-| iwind/rockmongo | php | 486 | php | 79 | 0/1/1/2/1 | 0/0 | no lockfile | 1.7 | 97 | no dependencies found at the repo root: manifests may be in subfolders, so this score may be false comfort |
-| top-think/thinkphp | php | 9433 | php | 31 | 0/4/3/3/1 | 0/0 | no lockfile | 6.6 | 125 | no dependencies found at the repo root: manifests may be in subfolders, so this score may be false comfort |
-| gimler/symfony-rest-edition | php | 952 | php | 59 | 1/1/0/2/1 | 17/1 | composer 1 direct / 4 all | 12.6 | 105 |  |
-| etsy/morgue | php | 1830 | php | 40 | 1/2/1/3/2 | 4/3 | no lockfile | 13.4 | 112 |  |
-| jedireza/aqua | node | 4060 | node | 0 | 2/5/5/2/0 | 65/12 | npm 12 own (+0 via children) / 45 all | 31.5 | 107 | score 0; only 50 of 65 deps checked (cap); npm audit flags 2 direct package(s) we did not: lodash, moment |
-| RickWong/react-isomorphic-starterkit | node | 184 | node | 30 | 1/2/3/3/2 | 33/3 | no lockfile | 20.2 | 98 |  |
-| Cretezy/Noderize | node | 1471 | node | 87 | 0/0/1/4/1 | 1/0 | no lockfile | 9.5 | 101 |  |
-| nodesource/npmsearch | node | 813 | node | 77 | 0/0/3/4/1 | 9/1 | no lockfile | 9.1 | 99 |  |
-| lvarayut/relay-fullstack | node | 1615 | node | 32 | 1/2/3/2/2 | 51/4 | npm 4 own (+22 via children) / 301 all | 32.2 | 103 | only 50 of 51 deps checked (cap) |
-| vesparny/fair-analytics | node | 227 | node | 42 | 0/2/6/2/2 | 27/5 | npm 3 own (+3 via children) / 53 all | 18.0 | 99 |  |
-| justadudewhohacks/websocket-chat | node | 1383 | node | 70 | 0/1/2/4/0 | 19/3 | npm 3 own (+9 via children) / 170 all | 14.8 | 100 |  |
-| themeteorchef/base | node | 3367 | node | 50 | 0/2/4/3/1 | 22/5 | no lockfile | 14.5 | 110 |  |
-| deepsyx/home-automation | node | 4273 | unknown | 96 | 0/0/0/2/0 | 0/0 | no lockfile | 8.6 | 104 | stack not detected; no dependencies found at the repo root: manifests may be in subfolders, so this score may be false comfort |
+| silexphp/Silex | php | 3661 | php | 0 | 4/7/6/4/3 | 32/13 | no lockfile | 8.3 | 98 | score 0; 3 projects assessed: ., src/Silex/Api, src/Silex/Provider; 13 finding(s) at half weight (no lockfile) |
+| zendframework/ZendSkeletonApplication | php | 2954 | php | 79 | 0/1/1/2/1 | 4/0 | no lockfile | 2.5 | 105 |  |
+| BootstrapCMS/CMS | php | 7420 | mixed | 26 | 1/3/1/4/2 | 19/2 | composer 2 direct / 17 all | 3.9 | 101 |  |
+| kohana/kohana | php | 1244 | php | 83 | 0/1/1/3/2 | 2/1 | no lockfile | 2.6 | 109 | 1 finding(s) at half weight (no lockfile) |
+| Hifone/Hifone | php | 3691 | mixed | 11 | 1/4/3/5/1 | 41/6 | composer 4 direct / 17 all | 7.6 | 109 | 2 finding(s) at half weight (no lockfile) |
+| codecasts/spa-starter-kit | php | 1136 | mixed | 0 | 3/12/10/7/3 | 88/20 | no lockfile | 12.3 | 112 | score 0; 2 projects assessed: client, webservice; 18 finding(s) at half weight (no lockfile) |
+| wardrobecms/wardrobe-archived | php | 594 | php | 77 | 1/0/1/3/1 | 2/1 | no lockfile | 6.3 | 100 | 1 finding(s) at half weight (no lockfile) |
+| iwind/rockmongo | php | 486 | php | 79 | 0/1/1/2/1 | 0/0 | no lockfile | 3.2 | 101 | no dependencies found: no manifest anywhere up to depth 3 |
+| top-think/thinkphp | php | 9433 | php | 31 | 0/4/3/3/1 | 0/0 | no lockfile | 6.9 | 127 | no dependencies found: no manifest anywhere up to depth 3 |
+| gimler/symfony-rest-edition | php | 952 | php | 59 | 1/1/0/2/1 | 17/1 | composer 1 direct / 4 all | 9.2 | 99 |  |
+| etsy/morgue | php | 1830 | php | 58 | 1/2/2/4/3 | 5/3 | no lockfile | 6.0 | 112 | 2 projects assessed: ., features/upload; 3 finding(s) at half weight (no lockfile) |
+| jedireza/aqua | node | 4060 | node | 0 | 3/7/5/2/0 | 65/15 | npm 12 own (+0 via children) / 45 all | 9.5 | 111 | score 0; npm audit flags 2 direct package(s) we did not: lodash, moment |
+| RickWong/react-isomorphic-starterkit | node | 184 | node | 51 | 1/2/3/3/2 | 33/3 | no lockfile | 4.4 | 99 | 3 finding(s) at half weight (no lockfile) |
+| Cretezy/Noderize | node | 1471 | node | 15 | 2/2/6/11/5 | 46/5 | no lockfile | 5.8 | 98 | 5 projects assessed: ., docs/website, packages/create, packages/runtime; 6 finding(s) at half weight (no lockfile) |
+| nodesource/npmsearch | node | 813 | node | 80 | 0/0/3/4/1 | 9/1 | no lockfile | 4.4 | 100 | 1 finding(s) at half weight (no lockfile) |
+| lvarayut/relay-fullstack | node | 1615 | node | 56 | 1/2/3/2/2 | 51/4 | npm 4 own (+27 via children) / 327 all | 6.4 | 98 | 4 finding(s) at half weight (no lockfile) |
+| vesparny/fair-analytics | node | 227 | node | 58 | 0/2/6/2/2 | 27/5 | npm 3 own (+5 via children) / 57 all | 6.4 | 99 | 5 finding(s) at half weight (no lockfile) |
+| justadudewhohacks/websocket-chat | node | 1383 | node | 70 | 0/1/2/4/0 | 19/3 | npm 3 own (+11 via children) / 190 all | 5.1 | 105 |  |
+| themeteorchef/base | node | 3367 | node | 70 | 0/2/4/3/1 | 22/5 | no lockfile | 4.8 | 100 | 5 finding(s) at half weight (no lockfile) |
+| deepsyx/home-automation | node | 4273 | node | 45 | 0/3/3/11/3 | 11/2 | no lockfile | 7.0 | 99 | 5 projects assessed: home-config, home-records, phone-app, server; 3 finding(s) at half weight (no lockfile) |
 
 <!-- corpus:end -->
 
@@ -96,11 +97,73 @@ What the run shows (written by hand from `eval/results/2026-10-31.json`; the tab
 - **Totals:** 20 of 20 repositories assessed, 0 skipped for extraction limits (the largest, thinkphp at 9.4 MB, fit), 0 errors, every archive carried the pinned commit sha. Median score 59, range 0 to 96. Total wall time 314 s sequentially; assessment alone 245 s. Peak memory 97 to 125 MiB, far under the 500 MiB host limit. These repositories are small; the memory and time result says nothing about large monorepos.
 - **Time is dominated by OSV round trips, not by code scanning.** Slowest: Hifone 56 s of assessment (41 direct dependencies), then relay-fullstack 29 s and aqua 27 s, against a 123 s tool timeout noted in docs/EXECUTION_PLAN.md section K. A repository with 50 checked dependencies on a slow OSV day would be close to the limit. Not yet measured: behaviour past the timeout.
 - **Agreement with independent tools (lockfile repositories only, 7 of 20).** Composer audit on 3 repositories: 7 direct packages with advisories, we flagged the same 7 and nothing else (3 of 3 repositories identical). npm audit (`--omit=dev`, counting only packages with an advisory of their own, not packages vulnerable through a child) on 4 repositories: 22 packages, we matched 20. The 2 misses are `lodash` and `moment` in jedireza/aqua, which sit beyond our 50-dependency cap (aqua has 65), not a matching error. We also flagged 4 dev-only packages that `--omit=dev` ignores by design (bootstrap, cookie in aqua; request, standard-version in fair-analytics). Small sample, one comparison per package; it does not show recall on unknown vulnerabilities.
-- **13 of 20 repositories have no lockfile, so their dependency numbers are not verified.** For these the version is the lowest the range allows, which overstates exposure (Silex: 13 of 31 direct dependencies flagged, score 0; Hifone: 2) and cannot be cross-checked with `npm audit` or `composer audit`. The report marks them approximate (`php-approximate-versions`, `node-approximate-versions`), but the score does not discount for it.
+- **13 of 20 repositories have no lockfile, so their dependency numbers are not verified.** For these the version is the lowest the range allows, which overstates exposure and cannot be cross-checked with `npm audit` or `composer audit`. Since this round such findings carry `confidence: low`, the title suffix `(version range, no lockfile)` and count at half weight in the score (section 4).
 - **The score saturates.** Silex and aqua both score 0, Hifone 2; the scale cannot tell a bad repository from a hopeless one.
-- **False comfort on monorepos and nested projects.** `codecasts/spa-starter-kit` (client/ and webservice/ folders), `deepsyx/home-automation` (server/, phone-app/, home-config/) have their manifests in subfolders. Metamorph assesses the root, found 0 dependencies, and scored them 79 and 96; home-automation is reported as stack `unknown`. Nothing in the result says "no manifest at the root". The corpus script flags this in the Notes column; the tool itself does not. `iwind/rockmongo` and `top-think/thinkphp` also show 0 dependencies, but there the lack of Composer is real (code is vendored), and the PHP smell rules did fire on thinkphp (11 rule ids, score 31).
+- **(First run, fixed in section 4.) False comfort on monorepos and nested projects.** `codecasts/spa-starter-kit` (client/ and webservice/ folders), `deepsyx/home-automation` (server/, phone-app/, home-config/) have their manifests in subfolders. Metamorph assesses the root, found 0 dependencies, and scored them 79 and 96; home-automation is reported as stack `unknown`. Nothing in the result says "no manifest at the root". The corpus script flags this in the Notes column; the tool itself does not. `iwind/rockmongo` and `top-think/thinkphp` also show 0 dependencies, but there the lack of Composer is real (code is vendored), and the PHP smell rules did fire on thinkphp (11 rule ids, score 31).
 - **High scores on old code.** ZendSkeletonApplication, spa-starter-kit and rockmongo all score 79 although they target PHP 5.x or are archived; the score weighs only what the rules can see, and the project-structure findings (no CI, no container) cost 2 points each.
 - **Stack detection:** 1 of 20 reported `unknown` (home-automation, see above); BootstrapCMS and Hifone were reported as `mixed` (composer.json plus package.json at the root). The other labels were not checked by hand against the repositories.
 - **Not measured here:** patch success rate (needs the runner), score change after apply, OSV-Scanner cross-check (not installed locally), precision of the PHP smell rules on real code (no human labelling of the 20 repositories was done), and any repository over the extraction limits.
 
 Reproduce: `npm run build && npm run eval` (about 6 minutes, needs network and, for the lockfile cross-check, `npm` and `composer` on the PATH). The tools run on a copy of the manifest and lockfile only, in a fresh temporary directory, with `--ignore-scripts` / `--no-scripts --no-plugins`. No repository code is executed.
+
+
+## 4. Accuracy round: nested projects, no-lockfile discount, bulk OSV, new rules
+
+Same 20 pinned repositories, same live feeds, same day. Before = the commit before this round (run from a copy of its build), after = this round. "Assess s" is the assessment step alone (download and extraction excluded), measured by the corpus runner per repository in its own process. Timing is network-dependent: OSV latency varies by the hour, so read the ratio, not the second.
+
+### 4.1 Projects (what is assessed)
+
+With no `subfolder`, `assess_project` now looks for `package.json` / `composer.json` up to 3 folder levels deep, assesses up to 5 projects and merges the findings; each finding carries `project` (folder, `.` for the root) when more than one project or a non-root project was assessed. The result has `projects` (path, stack, assessed) and `notes` (plain sentences: "No package.json or composer.json at the repository root. Assessed ...", "3 more projects not assessed (limit 5): ...", ignored manifests). With a `subfolder` the tool behaves as before (that folder is one project; a note says so if it has no manifest). `plan_modernization`, `preview_changes`, `apply_stage`, `generate_report` and `verify_patch` change the files of one project, so without `subfolder` they now stop with an error naming the subfolder projects when the root has no manifest, instead of planning against an empty root. Repository-wide checks (CI, container, committed env files, secrets, workflows) run once over all files and carry no project. The merged score is computed over all findings, so a repository with several projects is expected to score lower than any one of them alone.
+
+Ignores, each with a reason:
+
+| Ignored | Why |
+|---|---|
+| `node_modules`, `vendor`, `bower_components` | third-party code, not the team's project (never read) |
+| `.git`, `dist`, `build`, `.next`, `__pycache__` | generated or tool-owned (never read) |
+| `fixtures`, `fixture`, `__fixtures__`, `testdata` | sample projects built to look old, vulnerable or secret-like; assessing them gives false findings (never read: no PHP smells, secrets, env files or manifests from them) |
+| manifests under `test`, `tests`, `__tests__`, `spec` | harness and sample apps of the test suite; the folders are still read for repo-wide rules, but never become a project |
+| manifests under `examples`, `example`, `samples`, `sample`, `demo`, `demos` | documentation code, not shipped, depends on the real project; listed as ignored, assess one with `subfolder` |
+| manifests in hidden folders (`.devcontainer`, ...) | tool config |
+| manifests deeper than 3 levels | counted and reported, not assessed |
+
+Measured on the corpus: spa-starter-kit (client/, webservice/) went from 0 dependencies and score 79 to 88 dependencies in 2 projects and score 0; home-automation from stack `unknown`, 0 dependencies, score 96 to 4 projects, 11 dependencies, score 45; Noderize from 1 dependency, score 87 to 5 projects (root, docs/website, packages/create, packages/runtime, ...) and 46 dependencies, score 15. These scores got worse because the earlier ones were false comfort, not because the repositories changed. Silex, etsy/morgue also gained sub-projects (nested `composer.json` files).
+
+Not fixed, and a correction to the brief: Metamorph's own repository reports stack `mixed` and `composer-missing` ("1 PHP files") because of `runner/rector.php` (a Rector config in the runner folder), not because of test fixtures; fixtures are not read at all. A single stray PHP file in a Node project still triggers it. No principled threshold was chosen, so it was left alone.
+
+### 4.2 No lockfile (score-visible)
+
+A dependency advisory matched on a version guessed from a range gets `confidence: "low"`, the title suffix `(version range, no lockfile)`, `rankReason` "severity high, version range, no lockfile", ranks after certain findings of the same severity, and counts at half weight in the score (`LOW_CONFIDENCE_FACTOR = 0.5` in `src/modules/assessment/score.ts`; the score also reports `lowConfidenceFindings`, the assessment `dependencies.lowConfidence` and a note). Half is a stated convention, not a measured probability: the guess is the lowest version the range allows, so real installs are usually newer, but the lowest version is sometimes exactly what installs. Exact pins (`"1.2.3"`) are still treated as approximate without a lockfile (existing tests define that); not changed. Effect on the 13 no-lockfile repositories: kohana 77 to 83, wardrobe 64 to 77, Hifone 2 to 11, RickWong 30 to 51, fair-analytics 42 to 58, themeteorchef 50 to 70, morgue 40 to 58, npmsearch 77 to 80; Silex stays 0. (Some of these changes also include the new rules and the larger dependency check; the half-weight rule alone is visible in the "half weight" count in the Notes column.)
+
+### 4.3 Dependency check: 50 cap removed, bulk OSV, time budget
+
+The earlier check sent one OSV `/query` per package in sequence (56 s for 41 dependencies, about 1.4 s each) and stopped at 50. Now: unique `ecosystem:name@version` entries from all projects, production first, go to OSV `querybatch` in chunks of 500 (OSV accepts 1000), two chunks at a time; each distinct advisory is fetched once, 8 at a time, with retry and exponential backoff on 429/5xx/network errors (honours Retry-After); results are cached in memory per process for 1 hour. The limit is 500 packages per assessment and a 60 s total budget (`budgetMs`). A package whose advisory fetch failed or timed out is reported as not checked, never as clean. The assessment states `dependencies.unchecked` (production and dev counts, reason) and a note "Checked X of Y dependencies (...)". If OSV is unreachable the old `osv-unavailable` finding still appears. `analyze_advisory` keeps its own 50-package limit.
+
+| Repo | Score before | Score after | Deps checked before | Deps checked after | Assess s before | Assess s after |
+|---|---|---|---|---|---|---|
+| silexphp/Silex | 0 | 0 | 31/31 | 32/32 | 24.8 | 6.3 |
+| zendframework/ZendSkeletonApplication | 79 | 79 | 4/4 | 4/4 | 9.2 | 0.8 |
+| BootstrapCMS/CMS | 26 | 26 | 19/19 | 19/19 | 16.6 | 2.4 |
+| kohana/kohana | 77 | 83 | 2/2 | 2/2 | 2.6 | 1.7 |
+| Hifone/Hifone | 2 | 11 | 41/41 | 41/41 | 32.7 | 4.2 |
+| codecasts/spa-starter-kit | 79 | 0 | 0/0 | 88/88 | 0.5 | 8.5 |
+| wardrobecms/wardrobe-archived | 64 | 77 | 2/2 | 2/2 | 9.1 | 4.2 |
+| iwind/rockmongo | 79 | 79 | 0/0 | 0/0 | 5.4 | 0.5 |
+| top-think/thinkphp | 31 | 31 | 0/0 | 0/0 | 1.4 | 1.4 |
+| gimler/symfony-rest-edition | 59 | 59 | 17/17 | 17/17 | 10.9 | 6.3 |
+| etsy/morgue | 40 | 58 | 4/4 | 5/5 | 5.3 | 3.4 |
+| jedireza/aqua | 0 | 0 | 50/65 | 65/65 | 31.4 | 7.3 |
+| RickWong/react-isomorphic-starterkit | 30 | 51 | 33/33 | 33/33 | 20.6 | 3.3 |
+| Cretezy/Noderize | 87 | 15 | 1/1 | 46/46 | 2.0 | 3.3 |
+| nodesource/npmsearch | 77 | 80 | 9/9 | 9/9 | 8.5 | 3.0 |
+| lvarayut/relay-fullstack | 32 | 56 | 50/51 | 51/51 | 44.3 | 3.6 |
+| vesparny/fair-analytics | 42 | 58 | 27/27 | 27/27 | 20.6 | 3.8 |
+| justadudewhohacks/websocket-chat | 70 | 70 | 19/19 | 19/19 | 16.2 | 2.2 |
+| themeteorchef/base | 50 | 70 | 22/22 | 22/22 | 18.9 | 3.0 |
+| deepsyx/home-automation | 96 | 45 | 0/0 | 11/11 | 0.7 | 2.7 |
+
+Totals: assessment time 282 s before, 72 s after (4x); the whole corpus run (download, extraction, assessment, lockfile cross-check) 385 s before, 123 s after. Hifone (41 deps) 32.7 s to 4.2 s, relay-fullstack 44.3 s to 3.6 s, aqua 31.4 s to 7.3 s. Median score 54.5 to 57 (the two earlier medians in section 3 differ by run; the first run said 59). Where the time went: nearly all of it was the sequential per-package OSV round trip; code scanning is under a second. First assessments pay the network; a repeat of the same packages within an hour in one server process skips it (unit-tested, not separately timed).
+
+The earlier "npm audit flags lodash, moment in aqua that we did not" was not a cap miss: both are flagged by us now that all 65 are checked, but in `devDependencies` of the manifest, and the cross-check script counts only production packages, so it still lists them as tool-only. Remaining mismatch is that classification, not matching.
+
+Not verified: behaviour when OSV rate-limits for real (retry logic is unit-tested with fake responses only); time budget against a genuinely slow OSV (tested with a fake clock); precision of the new secrets/CI rules on real repositories (the corpus run reports their counts but nobody labelled them); memory on repositories above the extraction limits.

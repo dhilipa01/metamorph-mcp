@@ -1,4 +1,5 @@
 import type { ExecutionContext } from '@nitrostack/core';
+import { rootManifestGuard } from './assess.js';
 import { archiveUrl, createWorkdir, extractTarGz, fetchArchive, parseGithubRepo, resolveInside } from '../../common/safe-archive.js';
 
 export interface RepoMeta {
@@ -13,7 +14,7 @@ export async function withRepo<T>(
   subfolder: string | undefined,
   ctx: Pick<ExecutionContext, 'logger'>,
   fn: (dir: string, meta: RepoMeta) => Promise<T>,
-  deps: { fetchFn?: typeof fetch } = {}
+  deps: { fetchFn?: typeof fetch; requireProjectRoot?: boolean } = {}
 ): Promise<T> {
   let repo: ReturnType<typeof parseGithubRepo>;
   try {
@@ -44,6 +45,8 @@ export async function withRepo<T>(
     } catch {
       throw new Error('The subfolder is not valid. Use a path inside the repository, like apps/api.');
     }
+    // Tools that plan or patch one project's files need a project at the folder they act on: say so instead of acting on nothing.
+    if (deps.requireProjectRoot && !subfolder) await rootManifestGuard(root);
     return await fn(root, meta);
   } finally {
     await work.cleanup();

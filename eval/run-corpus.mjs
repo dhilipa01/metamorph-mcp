@@ -27,7 +27,7 @@ const sh = (cmd, args, opts = {}) =>
 // ---------- child: one repository ----------
 async function oneInner(repo, sha) {
   const { archiveUrl, createWorkdir, extractTarGz, fetchArchive } = await import(DIST('common/safe-archive.js'));
-  const { assessFull } = await import(DIST('modules/assessment/assess.js'));
+  const { assessRepository } = await import(DIST('modules/assessment/assess.js'));
   const rec = { repo, sha, status: 'ok' };
   const [owner, name] = repo.split('/');
   const work = await createWorkdir(); // a new empty temp directory per repository
@@ -53,7 +53,7 @@ async function oneInner(repo, sha) {
     const t2 = Date.now();
     let full;
     try {
-      full = await assessFull(work.dir);
+      full = await assessRepository(work.dir);
     } catch (e) {
       return { ...rec, status: 'error', error: `assess: ${e.message}` };
     }
@@ -67,6 +67,9 @@ async function oneInner(repo, sha) {
       deps: a.dependencies,
       runtime: a.runtime.declared ?? null,
       truncated: a.truncated,
+      projects: a.projects ?? null,
+      notes: a.notes ?? [],
+      lowConfidence: a.dependencies.lowConfidence ?? 0,
       rules: [...new Set(full.findings.map((f) => f.id.replace(/^dep-vulnerable:.*/, 'dep-vulnerable')))].sort(),
       osvUnavailable: full.findings.some((f) => f.id === 'osv-unavailable')
     });
@@ -173,9 +176,12 @@ const flag = (r) => {
   if (r.findingCount === 0) n.push('zero findings');
   if (r.osvUnavailable) n.push('OSV was unreachable');
   if (r.truncated) n.push('file reading truncated');
-  if (r.deps?.total === 0 && r.files > 20) n.push('no dependencies found at the repo root: manifests may be in subfolders, so this score may be false comfort');
+  if (r.deps?.total === 0 && r.files > 20) n.push('no dependencies found: no manifest anywhere up to depth 3');
+  if (r.projects && r.projects.length > 1) n.push(`${r.projects.filter((p) => p.assessed).length} projects assessed: ${r.projects.map((p) => p.path).slice(0, 4).join(', ')}`);
+  else if (r.projects?.[0] && r.projects[0].path !== '.') n.push(`root has no manifest; assessed ${r.projects[0].path}`);
+  if (r.lowConfidence) n.push(`${r.lowConfidence} finding(s) at half weight (no lockfile)`);
   if (r.shaMatches === false) n.push('archive commit differs from pin');
-  if (r.deps?.total > r.deps?.checked) n.push(`only ${r.deps.checked} of ${r.deps.total} deps checked (cap)`);
+  if (r.deps?.total > r.deps?.checked) n.push(`only ${r.deps.checked} of ${r.deps.total} deps checked`);
   const cc = r.crossCheck ?? {};
   for (const [tool, c] of Object.entries(cc)) {
     if (tool === 'skipped' || c.error) continue;

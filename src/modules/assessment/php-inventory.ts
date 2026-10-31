@@ -250,6 +250,18 @@ interface LineRule {
 
 const SUPERGLOBAL = /\$_(?:GET|POST|REQUEST|COOKIE)\b/;
 
+// Text that marks a value as a password: "pass" (password, passwd, $pass), "pwd", or a bare pw ($pw, ['pw']).
+// A line that only hashes something else (a file, a cache key) has none of these and is not reported.
+const PASSWORD_LIKE = /pass|pwd|(?<![a-z])pw(?![a-z])/i;
+
+// mysql_* call, but not a definition: `function mysql_query_count(` defines a method or shim and is not a use of the removed API.
+function usesRemovedMysqlApi(line: string): boolean {
+  for (const m of line.matchAll(/(?<![\w>:$])mysql_\w+\s*\(/gi)) {
+    if (!/\bfunction\s+&?\s*$/i.test(line.slice(0, m.index))) return true;
+  }
+  return false;
+}
+
 const LINE_RULES: LineRule[] = [
   {
     id: 'php-mysql-removed-api',
@@ -257,7 +269,7 @@ const LINE_RULES: LineRule[] = [
     severity: 'high',
     title: 'Uses the mysql_* API removed in PHP 7.0',
     recommendation: 'Migrate to PDO or mysqli with prepared statements.',
-    test: (l) => /(?<![\w>:$])mysql_\w+\s*\(/i.test(l)
+    test: usesRemovedMysqlApi
   },
   {
     id: 'php-sql-concatenation',
@@ -281,7 +293,7 @@ const LINE_RULES: LineRule[] = [
     severity: 'medium',
     title: 'Password hashed with md5 or sha1',
     recommendation: 'Use password_hash and password_verify with the default algorithm.',
-    test: (l) => /(?<![\w>:$])(?:md5|sha1)\s*\(/i.test(l) && /pass/i.test(l)
+    test: (l) => /(?<![\w>:$])(?:md5|sha1)\s*\(/i.test(l) && PASSWORD_LIKE.test(l)
   },
   {
     id: 'php-unserialize-input',

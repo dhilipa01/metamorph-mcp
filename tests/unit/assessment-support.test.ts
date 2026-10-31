@@ -30,7 +30,7 @@ describe('readKeyFiles', () => {
   });
 
   it('exposes the documented defaults', () => {
-    expect(DEFAULT_READ_LIMITS).toEqual({ maxFiles: 5000, maxDepth: 12, maxFileBytes: 262144, maxPhpFiles: 200, maxPhpBytes: 204800 });
+    expect(DEFAULT_READ_LIMITS).toEqual({ maxFiles: 5000, maxDepth: 12, maxFileBytes: 262144, maxPhpFiles: 200, maxPhpBytes: 204800, maxScanFiles: 400, maxScanFileBytes: 131072, maxScanTotalBytes: 8388608 });
     expect(KEY_FILES).toContain('package.json');
   });
 

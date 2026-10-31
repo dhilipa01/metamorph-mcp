@@ -52,7 +52,7 @@ export class PlanningTools {
     const { assessment, plan } = await withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
       const full = await assessFull(dir);
       return { assessment: full.assessment, plan: buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal }) };
-    });
+    }, { requireProjectRoot: true });
     const automated = plan.stages.find((s) => s.automated);
     return {
       assessmentId: assessment.assessmentId,
@@ -113,7 +113,7 @@ export class PlanningTools {
         if (!(e instanceof RangeError)) throw e;
         throw new Error(`${e.message} Call plan_modernization first (with the same goal, "${goal}") and pass one of its stage ids as "stage".`);
       }
-    });
+    }, { requireProjectRoot: true });
   }
 
   @Tool({
@@ -150,7 +150,7 @@ export class PlanningTools {
     const goal = input.goal ?? 'modernize_all';
     ctx.logger.info('apply_stage', { goal, stage: input.stage });
     return withRepo(input.repo_url, input.subfolder, ctx, (dir) =>
-      applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET })
-    );
+      applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }),
+    { requireProjectRoot: true });
   }
 }
