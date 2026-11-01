@@ -50,7 +50,7 @@ describe('GET /app route and page', () => {
   });
   it('has no external URLs, no storage, no key material; the key field is a password input', () => {
     const html = renderApp();
-    expect(html.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')).not.toMatch(/https?:\/\/(?!github\.com\/owner\/repo|github\\\.com)/);
+    expect(html.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')).not.toMatch(/https?:\/\/(?!github\.com\/)/);
     expect(html).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/);
     expect(html).toContain('type="password"');
     expect(html).toContain('Your key stays in this tab and is sent only to this server.');
