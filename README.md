@@ -10,7 +10,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178c6)
 ![tools](https://img.shields.io/badge/tools-9-success)
 
-[Dashboard](<deployment URL placeholder>/app) · [Docs](docs/) · [Evidence](docs/EVIDENCE.md)
+[Dashboard](https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app) · [Docs](docs/) · [Evidence](docs/EVIDENCE.md)
 
 </div>
 
@@ -29,7 +29,7 @@ Scope today: upgrade, not rewrite. Public GitHub repos only.
 
 ## Quick start
 
-1. **Try it with no AI client.** Open `<deployment URL placeholder>/app`, paste a key (it stays in the tab), run Assess, Plan, Preview and Report.
+1. **Try it with no AI client.** Open `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app`, paste a key (it stays in the tab), run Assess, Plan, Preview and Report.
 2. **Get a key.** Keys are issued by the deployment owner (no public sign-up). `read` runs everything except `plan_modernization` (`plan`) and `apply_stage` / `verify_patch` (`write`). Ask for `plan` at least.
 3. **Connect your agent.**
    - URL `https://<deployment-host>/mcp` (must end in `/mcp`), header `Authorization: Bearer <YOUR_API_KEY>`.
