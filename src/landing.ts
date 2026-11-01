@@ -90,7 +90,7 @@ export function renderLanding(endpoint: string): string {
 <body><main>
 <header><svg class="logo" viewBox="0 0 64 64" shape-rendering="crispEdges" fill="currentColor" role="img" aria-label="Metamorph logo"><path d="${LOGO_D64}"/></svg>
 <div><h1>Metamorph</h1><p class="lede">Assess, plan and verify legacy PHP and Node upgrades from your AI client.</p></div>
-<div class="top"><button id="theme" type="button">Toggle theme</button></div></header>
+<div class="top"><a href="/app">Open the dashboard</a> <button id="theme" type="button">Toggle theme</button></div></header>
 
 <h2>Connect</h2>
 <div class="card"><p class="first">MCP endpoint (Streamable HTTP)</p><pre>${e(endpoint)}</pre>

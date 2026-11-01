@@ -14,6 +14,7 @@ import { McpApplicationFactory } from '@nitrostack/core';
 import { AppModule } from './app.module.js';
 import { registerReportRoutes, type AppLike } from './modules/report/download.js';
 import { installLanding, type LandingApp } from './landing.js';
+import { installAppHost, type AppHostApp } from './app-host.js';
 import { installValidationDeferral } from './common/sdk-validation.js';
 
 /**
@@ -32,6 +33,7 @@ async function bootstrap() {
     registerReportRoutes(app as unknown as AppLike);
     // Swap the SDK's generic root page for ours (no external requests, honest content).
     installLanding(app as unknown as LandingApp, (m) => console.warn(m));
+    installAppHost(app as unknown as AppHostApp);
   }
 }
 
