@@ -15,6 +15,7 @@ import { AppModule } from './app.module.js';
 import { registerReportRoutes, type AppLike } from './modules/report/download.js';
 import { installLanding, type LandingApp } from './landing.js';
 import { installAppHost, type AppHostApp } from './app-host.js';
+import { installPublic, type PublicApp } from './public-proxy.js';
 import { inlineWidgetCss } from './widget-css.js';
 import { installValidationDeferral } from './common/sdk-validation.js';
 
@@ -35,7 +36,9 @@ async function bootstrap() {
     registerReportRoutes(app as unknown as AppLike);
     // Swap the SDK's generic root page for ours (no external requests, honest content).
     installLanding(app as unknown as LandingApp, (m) => console.warn(m));
-    installAppHost(app as unknown as AppHostApp);
+    // Keyless public dashboard: ephemeral in-memory key + allowlisted proxy at POST /app/rpc (METAMORPH_PUBLIC_DASHBOARD=off disables).
+    const pub = installPublic(app as unknown as PublicApp, { port: () => Number(process.env.PORT) || 3000 });
+    installAppHost(app as unknown as AppHostApp, { pub });
   }
 }
 

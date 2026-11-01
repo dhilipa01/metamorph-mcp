@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { LOGO_D64 } from './landing-logo.js';
 import { TOOLS, escapeHtml } from './landing.js';
 
+export const START_REPO = 'https://github.com/dhilipa01/metamorph-demo-legacy';
+export const START_SUB = 'php-shop';
+export const BANNER = 'Public dashboard: assess, plan, preview and projected apply on public GitHub repositories. Nothing is changed in any repository. Rate limited.';
 export const WIDGET_URI = 'ui://widget/next-score-dashboard.html';
 
 // ---- pure host logic. Kept as source text so the browser runs exactly what the unit tests run. ----
@@ -91,6 +94,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);ou
 button{font:inherit;font-size:14px;color:var(--ink);background:none;border:1px solid var(--line);border-radius:4px;padding:7px 12px;cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--accent);color:var(--onacc);border-color:var(--accent);font-weight:700;width:100%;padding:10px 12px}
+button.big{font-size:17px;padding:14px 12px}
+.banner{font-size:12px;margin:0;padding:8px 10px;border:1px solid var(--accent);border-radius:4px}
+details{font-size:13px}summary{cursor:pointer;color:var(--accent)}
 button.link{border:0;padding:0;font-size:12px;color:var(--accent);text-decoration:underline}
 ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 li button{width:100%;text-align:left;display:flex;gap:10px;align-items:baseline}
@@ -119,8 +125,9 @@ var TOOLS=${JSON.stringify(toolScopes)};
 var WIDGET=${JSON.stringify(WIDGET_URI)};
 var SHIM=${JSON.stringify(SHIM)};
 var origin=location.origin;
-var key='';var sid='';var rid=0;var canWrite=false;var pending=null;var busy=false;var inited=false;
+var pub0=document.body.getAttribute('data-pub')==='1';var key='';var sid='';var rid=0;var canWrite=pub0;var pending=null;var busy=false;var inited=false;
 var last={};var done={};
+function isPub(){return pub0&&key.length<8}
 var $=function(i){return document.getElementById(i)};
 var root=document.documentElement,frame=null,main=$('main'),status=$('status');
 var GH=/^https:\\/\\/github\\.com\\/[^\\/\\s]+\\/[^\\/\\s]+/;
@@ -128,7 +135,7 @@ function say(t,err){status.textContent=t;status.className=err?'err':''}
 function dark(){var t=root.getAttribute('data-theme');return t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches}
 function themeName(){return dark()?'dark':'light'}
 function inputs(){return{repo:$('repo').value.trim(),sub:$('sub').value.trim(),goal:$('goal').value}}
-function ready(){return key.length>=8&&GH.test(inputs().repo)&&!busy}
+function ready(){return(isPub()||key.length>=8)&&GH.test(inputs().repo)&&!busy}
 function refresh(){
   var r=ready();
   $('run').disabled=!r;
@@ -136,13 +143,14 @@ function refresh(){
   for(var i=0;i<order.length;i++){if(!done[order[i]]){nx=i;break}}
   order.forEach(function(s,i){var li=$('s-'+s);li.className=(done[s]?'done ':'')+(i===nx?'next':'');li.firstChild.disabled=!r||(s!=='assess'&&!done.assess)});
   $('s-apply').firstChild.disabled=!(r&&canWrite&&last.preview&&last.preview.approvalToken);
-  $('hint').textContent=key.length<8?'Paste your API key to enable the buttons.':(GH.test(inputs().repo)?'':'Enter a public GitHub repository URL.');
+  $('hint').textContent=(!isPub()&&key.length<8)?'Paste your API key to enable the buttons.':(GH.test(inputs().repo)?'':'Enter a public GitHub repository URL.');
 }
 function post(body){
   var h={'Content-Type':'application/json','Accept':'application/json, text/event-stream'};
-  if(key)h['Authorization']='Bearer '+key;
+  var dm=isPub();
+  if(!dm&&key)h['Authorization']='Bearer '+key;
   if(sid)h['mcp-session-id']=sid;
-  return fetch('/mcp',{method:'POST',headers:h,body:JSON.stringify(body),credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}).then(function(r){
+  return fetch(dm?'/app/rpc':'/mcp',{method:'POST',headers:h,body:JSON.stringify(body),credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}).then(function(r){
     var s=r.headers.get('mcp-session-id');if(s)sid=s;
     return r.text().then(function(t){
       var o=parseRpc(t);
@@ -223,7 +231,7 @@ function run(step){
   return mount().then(function(){return callTool(tool,args,'host')}).then(function(res){
     var out=outputOf(res);
     last[step]=out;done[step]=true;
-    if(step==='assess'&&!canWrite)probe();
+    if(step==='assess'&&!canWrite&&!isPub())probe();
     inject(out);
     say('Done: '+tool+'.');
   }).catch(function(e){say(e.message||String(e),true)}).then(function(){setBusy(false)});
@@ -253,8 +261,8 @@ window.addEventListener('message',function(ev){
   }
 });
 ['repo','sub','goal'].forEach(function(i){$(i).addEventListener('input',refresh)});
-$('key').addEventListener('input',function(){key=$('key').value;refresh()});
-$('forget').addEventListener('click',function(){key='';sid='';inited=false;canWrite=false;$('key').value='';say('Key forgotten.');refresh()});
+$('key').addEventListener('input',function(){key=$('key').value;sid='';inited=false;canWrite=isPub();refresh()});
+$('forget').addEventListener('click',function(){key='';sid='';inited=false;canWrite=pub0;$('key').value='';say(pub0?'Key forgotten. back to the public dashboard.':'Key forgotten.');refresh()});
 ['plan','preview','report','apply'].forEach(function(s){$('s-'+s).firstChild.addEventListener('click',function(){run(s)})});
 $('form').addEventListener('submit',function(e){e.preventDefault();if(ready())run('assess')});
 $('theme').addEventListener('click',function(){var n=dark()?'light':'dark';root.setAttribute('data-theme',n);send({type:'NITRO_INJECT_OPENAI',data:{theme:n}})});
@@ -289,7 +297,8 @@ export function widgetCss(cwd: string = process.cwd()): string {
   return file ? readFileSync(file, 'utf-8').replace(/<\//g, '<\\/') : '';
 }
 
-export function renderApp(): string {
+export function renderApp(opts: { pub?: boolean } = {}): string {
+  const pub = opts.pub !== false;
   const e = escapeHtml;
   const step = (id: string, n: number, label: string, hint = '') => `<li id="s-${id}"><button type="button"><span class="n">${n}</span>${e(label)}<span class="h">${e(hint)}</span></button></li>`;
   return `<!doctype html>
@@ -297,23 +306,26 @@ export function renderApp(): string {
 <title>Metamorph dashboard</title>
 <meta name="referrer" content="no-referrer">
 <style>${CSS}</style></head>
-<body>
+<body data-pub="${pub ? 1 : 0}">
 <aside>
 <div class="brand"><svg class="logo" viewBox="0 0 64 64" shape-rendering="crispEdges" fill="currentColor" role="img" aria-label="Metamorph logo"><path d="${LOGO_D64}"/></svg><div><h1>Metamorph</h1><p class="sub">Browser dashboard</p></div></div>
+${pub ? '<p class="banner">' + e(BANNER) + '</p>' : ''}
 <form id="form" autocomplete="off">
-<div><label for="repo">Repository URL</label><input id="repo" type="url" placeholder="https://github.com/owner/repo" spellcheck="false"></div>
-<div class="f"><label for="sub">Subfolder (optional)</label><input id="sub" type="text" placeholder="apps/api" spellcheck="false"></div>
+<div><label for="repo">Repository URL</label><input id="repo" type="url" placeholder="https://github.com/owner/repo" spellcheck="false"${pub ? ' value="' + e(START_REPO) + '"' : ''}></div>
+<div class="f"><label for="sub">Subfolder (optional)</label><input id="sub" type="text" placeholder="apps/api" spellcheck="false"${pub ? ' value="' + e(START_SUB) + '"' : ''}></div>
 <div class="f"><label for="goal">Goal</label><select id="goal"><option value="modernize_all">modernize_all</option><option value="patch_advisory">patch_advisory</option><option value="upgrade_runtime">upgrade_runtime</option></select></div>
-<div class="f"><label for="key">API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer key"><p class="note">Your key stays in this tab and is sent only to this server.</p>
-<div class="bar"><span id="hint" class="note"></span><button type="button" id="forget" class="link">Forget key</button></div></div>
-<div class="f"><button type="submit" id="run" class="primary" disabled>Run assess</button></div>
+<div class="f"><button type="submit" id="run" class="primary big" disabled>Run assess</button><p id="hint" class="note"></p></div>
 </form>
 <ol aria-label="Flow">
-${step('assess', 1, 'Assess')}${step('plan', 2, 'Plan')}${step('preview', 3, 'Preview')}${step('report', 4, 'Report')}${step('apply', 5, 'Apply', 'write scope')}<li id="s-verify"><button type="button" disabled><span class="n">6</span>Verify<span class="h">write scope</span></button></li>
+${step('assess', 1, 'Assess')}${step('plan', 2, 'Plan')}${step('preview', 3, 'Preview')}${step('report', 4, 'Report')}${step('apply', 5, 'Apply', 'write scope')}<li id="s-verify"><button type="button" disabled title="Verify needs your own key and the runner"><span class="n">6</span>Verify<span class="h">${pub ? 'own key + runner' : 'write scope'}</span></button></li>
 </ol>
+<details id="own"${pub ? '' : ' open'}><summary>Use my own key</summary>
+<div class="f"><label for="key">API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer key"><p class="note">Your key stays in this tab and is sent only to this server.</p>
+<div class="bar"><span></span><button type="button" id="forget" class="link">Forget key</button></div></div>
+</details>
 <div class="bar foot"><button type="button" id="theme">Toggle theme</button><a href="/">Back to overview</a></div>
 </aside>
-<main id="main"><div id="empty">Enter a repository and key, then run Assess.<br>The real dashboard widget appears here.</div><div id="busy">Working...</div></main>
+<main id="main"><div id="empty">Click Run assess to see the dashboard</div><div id="busy">Working...</div></main>
 <div id="status" role="status" aria-live="polite">Ready.</div>
 <script type="text/plain" id="wcss">${widgetCss()}</script>
 <script>${JS}</script></body></html>`;
@@ -324,7 +336,7 @@ interface Res {
   setHeader(name: string, value: string): unknown;
   send(body: string): unknown;
 }
-export function handleApp(_req: unknown, res: Res): void {
+export function handleApp(_req: unknown, res: Res, pub = true): void {
   res.status(200);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -332,12 +344,12 @@ export function handleApp(_req: unknown, res: Res): void {
   res.setHeader('Content-Security-Policy', appCsp());
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Cache-Control', 'no-store');
-  res.send(renderApp());
+  res.send(renderApp({ pub }));
 }
 
 export interface AppHostApp {
   get(path: string, handler: (req: never, res: never) => void): unknown;
 }
-export function installAppHost(app: AppHostApp): void {
-  app.get('/app', ((req: unknown, res: Res) => handleApp(req, res)) as (req: never, res: never) => void);
+export function installAppHost(app: AppHostApp, opts: { pub?: boolean } = {}): void {
+  app.get('/app', ((req: unknown, res: Res) => handleApp(req, res, opts.pub !== false)) as (req: never, res: never) => void);
 }

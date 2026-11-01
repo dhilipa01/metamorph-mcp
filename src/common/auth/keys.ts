@@ -36,6 +36,16 @@ export function parseKeyTable(env: Record<string, string | undefined>): KeyEntry
   return out;
 }
 
+// Runtime-only keys (the ephemeral public dashboard key). Held in memory, consulted by the guard next to the env table.
+const runtimeKeys: KeyEntry[] = [];
+export function registerRuntimeKey(label: string, scope: Scope, hash: Buffer): void {
+  runtimeKeys.push({ label: label.toLowerCase(), scope, hash });
+}
+export const runtimeKeyTable = (): KeyEntry[] => runtimeKeys;
+export function clearRuntimeKeys(): void {
+  runtimeKeys.length = 0;
+}
+
 export function extractKey(metadata: Record<string, unknown> | undefined): string | undefined {
   if (!metadata) return undefined;
   const bearer = metadata['authorization'] ?? metadata['Authorization'];

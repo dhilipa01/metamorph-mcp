@@ -1,9 +1,9 @@
 import { Guard, ExecutionContext } from '@nitrostack/core';
-import { ANON_KEY_ID, authorize, extractKey, parseKeyTable, Scope } from './keys.js';
+import { ANON_KEY_ID, authorize, extractKey, parseKeyTable, runtimeKeyTable, Scope } from './keys.js';
 
 // Usage: @UseGuards(scopeGuard('write')). Keys come from METAMORPH_KEY_* env vars, read once at first use.
 let table: ReturnType<typeof parseKeyTable> | undefined;
-const keys = () => (table ??= parseKeyTable(process.env));
+const keys = () => [...(table ??= parseKeyTable(process.env)), ...runtimeKeyTable()];
 
 export function scopeGuard(required: Scope) {
   return class ScopeGuard implements Guard {
