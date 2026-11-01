@@ -23,7 +23,7 @@ export const LIGHT: Record<string, string> = {
 
 export const DARK: Record<string, string> = {
   '--base': '#151614',
-  '--panel': '#1E3527',
+  '--panel': '#1A211C',
   '--accent': '#D1344A',
   '--on-accent': '#FFF3EE',
   '--accent-ink': '#F0788C',

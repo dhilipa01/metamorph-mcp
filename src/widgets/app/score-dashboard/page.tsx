@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
 import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
-import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
+import { ApplyView } from '../../components/ApplyView';
 import { CloudView, WatchView } from '../../components/MonitorViews';
 import { PlanView } from '../../components/PlanView';
 import { ReportView } from '../../components/ReportView';
@@ -12,7 +12,7 @@ import { Shell, ThemeSwitch, useLayout, useTheme, type StepIndex } from '../../c
 import { repoLabel, shortSha } from '../../lib/calls';
 import { tokensFor } from '../../lib/theme';
 import { outputFromMessage } from '../../lib/tool-output';
-import { UNRECOGNISED_HEADLINE, describeUnrecognised, scoreBand, toViewModel, unrecognisedDetail, type ViewModel, type ApplyVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
+import { UNRECOGNISED_HEADLINE, describeUnrecognised, toViewModel, unrecognisedDetail, type ViewModel } from '../../lib/view-model';
 import '../tokens.css';
 import '../mm.css';
 import '../parts.css';
@@ -20,128 +20,7 @@ import '../report.css';
 import '../verify.css';
 import '../plan.css';
 import '../monitor.css';
-import './dashboard.css';
-
-const R = 52;
-const CIRC = 2 * Math.PI * R;
-
-function SeverityChip({ severity }: { severity: Severity }) {
-  return (
-    <span className={`chip ${severity}`}>
-      <SeverityIcon severity={severity} />
-      {SEVERITY_LABEL[severity]}
-    </span>
-  );
-}
-
-function ScoreRing({ score, label }: { score: number; label: string }) {
-  const band = scoreBand(score);
-  const offset = CIRC * (1 - score / 100);
-  return (
-    <svg className="ring" viewBox="0 0 120 120" role="img" aria-label={`${label} ${score} out of 100`}>
-      <circle className="ring-track" cx="60" cy="60" r={R} />
-      <circle className={`ring-arc ${band}`} cx="60" cy="60" r={R} style={{ ['--circ' as string]: CIRC.toFixed(2), ['--off' as string]: offset.toFixed(2) }} />
-      <text className="ring-value" x="60" y="66" textAnchor="middle">
-        {score}
-      </text>
-      <text className="ring-sub" x="60" y="84" textAnchor="middle">
-        out of 100
-      </text>
-    </svg>
-  );
-}
-
-function Bar({ value }: { value: number }) {
-  return (
-    <span className="bar-track" aria-hidden="true">
-      <span className={`bar-fill ${scoreBand(value)}`} style={{ width: `${value}%` }} />
-    </span>
-  );
-}
-
-function Apply({ vm }: { vm: ApplyVM }) {
-  const delta = vm.scoreDelta;
-  const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
-  return (
-    <>
-      <p className="projected" role="note">
-        <span className="chip guided">Projected</span> Projected result, nothing in your repo was changed.
-      </p>
-      <div className="card compare">
-        <div className="compare-col">
-          <ScoreRing score={vm.scoreBefore} label="Score before" />
-          <p className="meta">Before</p>
-        </div>
-        <div className="compare-mid">
-          <span className={`chip delta ${delta > 0 ? 'low' : delta < 0 ? 'high' : 'neutral'}`} aria-label={`Score change ${deltaText}`}>
-            {deltaText}
-          </span>
-          <span className="arrow" aria-hidden="true">
-            →
-          </span>
-        </div>
-        <div className="compare-col">
-          <ScoreRing score={vm.scoreAfter} label="Projected score after" />
-          <p className="meta">After (projected)</p>
-        </div>
-      </div>
-      <p className="meta" style={{ marginTop: 8 }}>
-        Stage {vm.stage.index !== undefined ? `${vm.stage.index}: ` : ''}
-        {vm.stage.title} · {vm.stage.risk} risk
-      </p>
-
-      <section aria-labelledby="sd-fixed">
-        <h2 id="sd-fixed">Findings fixed ({vm.fixedCount})</h2>
-        {vm.findingsFixed.length === 0 ? (
-          <div className="card muted">No findings were fixed by this stage.</div>
-        ) : (
-          <ul className="card plain">
-            {vm.findingsFixed.map((f, i) => (
-              <li key={`${f}-${i}`} className="mono">
-                {f}
-              </li>
-            ))}
-          </ul>
-        )}
-        {vm.fixedCount > vm.findingsFixed.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.findingsFixed.length} of {vm.fixedCount}.</p>}
-      </section>
-
-      <section aria-labelledby="sd-rem">
-        <h2 id="sd-rem">Still remaining ({vm.remainingCount})</h2>
-        {vm.remaining.length === 0 ? (
-          <div className="card muted">Nothing remaining.</div>
-        ) : (
-          <ul className="list">
-            {vm.remaining.map((r, i) => (
-              <li key={`${r.id}-${i}`} className="finding">
-                <div className="chips" style={{ marginTop: 0 }}>
-                  <SeverityChip severity={r.severity} />
-                </div>
-                <h3>{r.title}</h3>
-              </li>
-            ))}
-          </ul>
-        )}
-        {vm.remainingCount > vm.remaining.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.remaining.length} of {vm.remainingCount}.</p>}
-      </section>
-
-      {vm.files.length > 0 && (
-        <section aria-labelledby="sd-files">
-          <h2 id="sd-files">Files in the patch ({vm.fileCount})</h2>
-          <ul className="card plain">
-            {vm.files.map((f, i) => (
-              <li key={`${f.path}-${i}`}>
-                <span className="chip neutral">{f.action}</span> <span className="mono">{f.path}</span>
-              </li>
-            ))}
-          </ul>
-          {vm.fileCount > vm.files.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.files.length} of {vm.fileCount}.</p>}
-        </section>
-      )}
-      {vm.note && <p className="meta" style={{ marginTop: 12 }}>{vm.note}</p>}
-    </>
-  );
-}
+import '../apply.css';
 
 class ResultBoundary extends React.Component<{ raw: unknown; children: React.ReactNode }, { error?: string }> {
   state: { error?: string } = {};
@@ -213,17 +92,7 @@ function stepOf(vm: ViewModel): StepIndex | null {
   }
 }
 
-function Legacy({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
-  const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'verify' ? 'Verification' : vm.kind === 'plan' ? 'Modernization plan' : 'Projected result';
-  return (
-    <div className="sd">
-      <h1>{title}</h1>
-      {vm.kind === 'apply' ? <Apply vm={vm} /> : null}
-    </div>
-  );
-}
-
-function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | 'inline'; actions: Actions; open: (url: string) => void }) {
+function Body({ vm, layout, actions }: { vm: ViewModel; layout: 'full' | 'inline'; actions: Actions }) {
   switch (vm.kind) {
     case 'empty':
       return <EmptyState />;
@@ -242,7 +111,7 @@ function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | '
     case 'assessment':
       return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
     default:
-      return <Legacy vm={vm} open={open} />;
+      return <ApplyView vm={vm} />;
   }
 }
 
@@ -294,7 +163,7 @@ export default function ScoreDashboardPage() {
           <LoadingState />
         ) : (
           <ResultBoundary raw={raw}>
-            <Body vm={vm} layout={layout} actions={actions} open={open} />
+            <Body vm={vm} layout={layout} actions={actions} />
           </ResultBoundary>
         )}
       </div>
