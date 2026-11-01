@@ -46,6 +46,12 @@ describe('landing route replacement', () => {
     expect(installLanding(app, () => {})).toBe(true);
     expect(stack.map((l) => l.name)).toEqual(['mcp', 'ours', 'after']);
   });
+  it('survives the Express 4 `router` getter that throws', () => {
+    const { app, stack } = fakeApp(true, '_router');
+    Object.defineProperty(app, 'router', { get() { throw new Error('app.router is deprecated'); } });
+    expect(installLanding(app, () => {})).toBe(true);
+    expect(stack.map((l) => l.name)).toEqual(['mcp', 'ours', 'after']);
+  });
   it('registers ours and warns once when no SDK layer is found', () => {
     const { app, stack, handlers } = fakeApp(false);
     const warnings: string[] = [];
@@ -93,6 +99,7 @@ describe('landing page', () => {
     const urls = (html.match(/https?:\/\/[^\s"'<)]+/g) ?? []).filter((u) => u !== endpoint);
     expect(new Set(urls)).toEqual(new Set([REPO_URL, `${REPO_URL}#readme`]));
     expect(html).not.toMatch(/<(link|img|iframe)\b|@import|url\(/i);
+    expect(html).not.toMatch(/\sstyle=|\sonclick=/i); // blocked by the hash-only CSP
   });
   it('inline style and script match the hashes in the CSP', async () => {
     const { createHash } = await import('node:crypto');

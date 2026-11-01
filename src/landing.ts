@@ -65,7 +65,8 @@ th,td{text-align:left;padding:8px 10px 8px 0;border-bottom:1px solid var(--line)
 th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);font-weight:600}
 td.n{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;white-space:nowrap}
 .big{font-family:Georgia,"Times New Roman",serif;font-size:28px;line-height:1}
-ul{margin:8px 0 0;padding-left:20px}
+.first{margin:0 0 8px}
+.note{font-size:15px;color:var(--mute)}
 a{color:var(--accent)}
 footer{margin-top:40px;font-size:14px;color:var(--mute)}
 @media (max-width:640px){h1{font-size:32px}main{padding:24px 16px 48px}svg.logo{width:52px;height:52px}td.n{white-space:normal}}
@@ -92,7 +93,7 @@ export function renderLanding(endpoint: string): string {
 <div class="top"><button id="theme" type="button">Toggle theme</button></div></header>
 
 <h2>Connect</h2>
-<div class="card"><p style="margin:0 0 8px">MCP endpoint (Streamable HTTP)</p><pre>${e(endpoint)}</pre>
+<div class="card"><p class="first">MCP endpoint (Streamable HTTP)</p><pre>${e(endpoint)}</pre>
 <p>Send your key as <code>Authorization: Bearer &lt;key&gt;</code>. Keys carry one of three cumulative scopes: <code>read</code>, <code>plan</code> (includes read), <code>write</code> (includes plan). Ask the server owner for a key.</p></div>
 
 <h2>Tools</h2>
@@ -103,7 +104,7 @@ export function renderLanding(endpoint: string): string {
 
 <h2>What is real and what is not</h2>
 <table><thead><tr><th>Item</th><th>Label</th><th>Note</th></tr></thead><tbody>${ev}</tbody></table>
-<p class="lede" style="font-size:15px">Nothing here changes your repository. Full list: docs/EVIDENCE.md in the repository.</p>
+<p class="note">Nothing here changes your repository. Full list: docs/EVIDENCE.md in the repository.</p>
 
 <footer><a href="${REPO_URL}">GitHub repository</a> &middot; <a href="${README_URL}">README</a></footer>
 </main><script>${JS}</script></body></html>`;
@@ -156,12 +157,15 @@ export interface LandingApp {
 // Removes the SDK's GET '/' layer, registers ours, and moves it into the freed position so anything registered after the
 // SDK page keeps its order. Relies on Express internals (router.stack); if they are not found, ours is simply added.
 export function installLanding(app: LandingApp, warn: (msg: string) => void = (m) => console.warn(m)): boolean {
-  let stack: LayerLike[] | undefined;
-  try {
-    stack = app.router?.stack ?? app._router?.stack;
-  } catch {
-    stack = undefined;
-  }
+  // Express 4 keeps the stack on _router (and its `router` getter throws); Express 5 on router.
+  const stackOf = (read: () => LayerLike[] | undefined): LayerLike[] | undefined => {
+    try {
+      return read();
+    } catch {
+      return undefined;
+    }
+  };
+  const stack = stackOf(() => app._router?.stack) ?? stackOf(() => app.router?.stack);
   const idx = stack ? stack.findIndex((l) => l.route?.path === '/' && l.route.methods?.get) : -1;
   if (stack && idx >= 0) stack.splice(idx, 1);
   app.get('/', ((req: Req, res: Res) => handleLanding(req, res)) as (req: never, res: never) => void);
