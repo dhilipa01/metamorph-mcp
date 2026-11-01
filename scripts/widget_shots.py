@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests/fixtures/widget"
 # what to wait for before the screenshot, per view
-READY = {"assessment": ".numeral", "report": "[data-view=report]", "verify": "[data-view=verify]", "plan": "[data-view=plan]", "apply": ".sd"}
+READY = {"assessment": ".numeral", "report": "[data-view=report]", "verify": "[data-view=verify]", "plan": "[data-view=plan]", "apply": ".sd", "watch": "[data-view=watch]", "cloud": "[data-view=cloud]"}
 SHOTS = [
     # name, view, fixture, theme, mode, width, height
     ("assessment-light-1920x1080", "assessment", "assessment", "light", "full", 1920, 1080),
@@ -34,6 +34,8 @@ for _view, _fix in (("report", "report"), ("verify", "verify-notverified"), ("pl
     for _theme in ("light", "dark"):
         for _w, _h in ((1920, 1080), (1280, 720)):
             SHOTS.append((f"{_view}-{_theme}-{_w}x{_h}", _view, _fix, _theme, "full", _w, _h))
+SHOTS.append(("watch-light-1920x1080", "watch", "watch", "light", "full", 1920, 1080))
+SHOTS.append(("cloud-light-1920x1080", "cloud", "cloud", "light", "full", 1920, 1080))
 SHOTS.append(("verify-verified-light-1920x1080", "verify", "verify-verified", "light", "full", 1920, 1080))
 
 
@@ -58,6 +60,10 @@ def load_fixture(name, with_repo=False):
         return sc("verify_patch.notverified.result.json")
     if name == "verify-verified":
         return sc("verify_patch.verified.result.json")
+    if name == "watch":
+        return sc("check_watch.result.json")
+    if name == "cloud":
+        return sc("cloud_inventory.result.json")
     if name == "plan":
         return sc("plan_modernization.result.json")
     if name == "apply":

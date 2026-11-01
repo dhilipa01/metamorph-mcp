@@ -1,4 +1,4 @@
-import { ResourceDecorator as Resource, UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { ResourceDecorator as Resource, UseGuards, Widget, ExecutionContext, z } from '@nitrostack/core';
 import { Tool } from '../../common/validated-tool.js';
 import { READS_CLOUD_ACCOUNT } from '../../common/tool-annotations.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
@@ -26,6 +26,7 @@ export class CloudTools {
       response: { provider: 'aws', account: '****1234', regions: ['eu-west-1'], counts: { lambda: 12 }, findingsTotal: 0, findings: [], notChecked: [], note: 'Read-only: nothing was changed in your AWS account.' }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
   async cloudInventory(input: { provider: 'aws'; regions?: string[]; services?: Service[] }, ctx: ExecutionContext) {
     ctx.logger.info('cloud_inventory', { regions: input.regions?.length ?? 0, services: input.services?.length ?? SERVICES.length });

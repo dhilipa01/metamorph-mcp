@@ -1,4 +1,4 @@
-import { UseGuards, ExecutionContext, z } from '@nitrostack/core';
+import { UseGuards, Widget, ExecutionContext, z } from '@nitrostack/core';
 import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { READS_PUBLIC_DATA } from '../../common/tool-annotations.js';
@@ -23,6 +23,7 @@ export class FeedsTools {
       response: { kevHits: [{ cveId: 'CVE-2021-44228' }], epss: [{ cve: 'CVE-2021-44228', epss: 0.99 }], eol: [{ product: 'php', cycle: '8.1', isEol: true }], feedItems: [], unavailable: [] }
     }
   })
+  @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
   async checkWatch(raw: { cve_ids?: string | string[]; products?: string | string[]; since?: string }, ctx: ExecutionContext) {
     const input = { cve_ids: toList(raw.cve_ids), products: toList(raw.products), since: raw.since };

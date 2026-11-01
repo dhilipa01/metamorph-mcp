@@ -16,6 +16,8 @@ export const MAX_CHECKS = 25;
 export const MAX_REASONS = 6;
 export const MAX_PROJECTS = 10;
 export const MAX_NOTES = 5;
+export const MAX_WATCH = 20;
+export const MAX_WATCH_ITEMS = 10;
 const ORIGINS = ['measured', 'projected', 'unverified', 'reported'] as const;
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
@@ -38,6 +40,7 @@ export interface FindingVM {
   evidence?: string;
   recommendation?: string;
   rankReason?: string;
+  source?: string;
   // Known exploited (CISA KEV) and EPSS probability 0..1, only when the result carries them.
   kev?: boolean;
   epss?: number;
@@ -207,7 +210,35 @@ export interface UnknownVM {
   keys: string[];
 }
 
-export type ViewModel = AssessmentVM | PlanVM | ApplyVM | VerifyVM | ReportVM | EmptyVM | UnknownVM;
+// check_watch output (src/modules/feeds/check.ts). Every row keeps its source URL and fetch time.
+export interface WatchVM {
+  kind: 'watch';
+  kev: Array<{ cveId: string; vendor: string; product: string; dateAdded?: string; dueDate?: string; ransomware: boolean; source?: string; fetchedAt?: string }>;
+  epss: Array<{ cve: string; epss: number; percentile: number; date?: string; source?: string; fetchedAt?: string }>;
+  eol: Array<{ product: string; cycle: string; eolDate?: string; isEol: boolean; latest?: string; support?: string; source?: string; fetchedAt?: string }>;
+  feedItems: Array<{ title: string; link?: string; published?: string; feed: string; source?: string; fetchedAt?: string }>;
+  unavailable: string[];
+  fetchedAt?: string;
+  nextStep?: string;
+}
+
+// cloud_inventory output (src/modules/cloud/inventory.ts). The account is only ever the masked form.
+export interface CloudVM {
+  kind: 'cloud';
+  account: string;
+  regions: string[];
+  counts: Array<{ service: string; count: number }>;
+  severityCounts: Array<{ severity: Severity; count: number }>;
+  findingsTotal: number;
+  findings: FindingVM[];
+  moreFindings: number;
+  notChecked: Array<{ service: string; region?: string; code: string; note?: string }>;
+  limits: string[];
+  generatedAt?: string;
+  note?: string;
+}
+
+export type ViewModel = AssessmentVM | PlanVM | ApplyVM | VerifyVM | ReportVM | WatchVM | CloudVM | EmptyVM | UnknownVM;
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
 const RISKS: Risk[] = ['low', 'medium', 'high'];
@@ -292,6 +323,7 @@ function finding(raw: unknown): FindingVM | undefined {
     evidence: str(raw.evidence),
     recommendation: str(raw.recommendation),
     rankReason: str(raw.rankReason),
+    source: str(raw.source),
     ...(raw.kev === true ? { kev: true } : {}),
     ...(num(raw.epss) !== undefined && num(raw.epss)! >= 0 && num(raw.epss)! <= 1 ? { epss: num(raw.epss) } : {}),
     ...(str(raw.project) ? { project: str(raw.project) } : {})
@@ -559,7 +591,69 @@ const MAX_UNWRAP_DEPTH = 5;
 const MAX_BLOCKS = 20;
 
 // Classify one object by its own fields. Undefined when it is none of the known results.
+function toWatch(o: Record<string, unknown>): WatchVM {
+  const src = (r: Record<string, unknown>) => ({ source: str(r.source), fetchedAt: str(r.fetchedAt) });
+  return {
+    kind: 'watch',
+    kev: list(o.kevHits, MAX_WATCH, (r) => {
+      if (!isObj(r)) return undefined;
+      const cveId = str(r.cveId);
+      return cveId ? { cveId, vendor: str(r.vendor) ?? '', product: str(r.product) ?? '', dateAdded: str(r.dateAdded), dueDate: str(r.dueDate), ransomware: r.ransomware === true, ...src(r) } : undefined;
+    }),
+    epss: list(o.epss, MAX_WATCH, (r) => {
+      if (!isObj(r)) return undefined;
+      const cve = str(r.cve);
+      const e = num(r.epss);
+      return cve && e !== undefined ? { cve, epss: Math.min(1, Math.max(0, e)), percentile: Math.min(1, Math.max(0, num(r.percentile) ?? 0)), date: str(r.date), ...src(r) } : undefined;
+    }),
+    eol: list(o.eol, MAX_WATCH, (r) => {
+      if (!isObj(r)) return undefined;
+      const product = str(r.product);
+      const cycle = str(r.cycle);
+      return product && cycle ? { product, cycle, eolDate: typeof r.eol === 'string' ? str(r.eol) : undefined, isEol: r.isEol === true, latest: str(r.latest), support: str(r.support), ...src(r) } : undefined;
+    }),
+    feedItems: list(o.feedItems, MAX_WATCH_ITEMS, (r) => {
+      if (!isObj(r)) return undefined;
+      const title = str(r.title);
+      return title ? { title, link: safeHttpUrl(r.link), published: str(r.published), feed: str(r.feed) ?? 'feed', ...src(r) } : undefined;
+    }),
+    unavailable: strList(o.unavailable, MAX_NOTES * 2),
+    fetchedAt: str(o.fetchedAt),
+    nextStep: str(o.nextStep)
+  };
+}
+
+const MASKED = /^\*{1,12}[0-9]{1,4}$/;
+
+function toCloud(o: Record<string, unknown>): CloudVM {
+  const counts = isObj(o.counts) ? o.counts : {};
+  const sev = isObj(o.severityCounts) ? o.severityCounts : {};
+  const findings = list(o.findings, MAX_FINDINGS, finding);
+  return {
+    kind: 'cloud',
+    account: typeof o.account === 'string' && MASKED.test(o.account) ? o.account : '****',
+    regions: strList(o.regions, 6),
+    counts: Object.entries(counts).filter(([, v]) => num(v) !== undefined).slice(0, 8).map(([service, v]) => ({ service: service.slice(0, 20), count: count(v) })),
+    severityCounts: SEVERITIES.map((severity) => ({ severity, count: count(sev[severity]) })),
+    findingsTotal: Math.max(count(o.findingsTotal), findings.length),
+    findings,
+    moreFindings: count(o.moreFindings),
+    notChecked: list(o.notChecked, MAX_WATCH, (r) => {
+      if (!isObj(r)) return undefined;
+      const service = str(r.service);
+      const code = str(r.code);
+      return service && code ? { service, region: str(r.region), code, note: str(r.note) } : undefined;
+    }),
+    limits: strList(o.limits, MAX_NOTES),
+    generatedAt: str(o.generatedAt),
+    note: str(o.note)
+  };
+}
+
 function classify(o: Record<string, unknown>): ViewModel | undefined {
+  // Unique key sets: these cannot match an assessment (score), plan (stages), apply (scoreBefore), verify or report.
+  if (Array.isArray(o.kevHits) && Array.isArray(o.epss) && Array.isArray(o.eol) && Array.isArray(o.feedItems)) return toWatch(o);
+  if (o.provider === 'aws' && typeof o.account === 'string' && isObj(o.counts) && Array.isArray(o.findings) && !('score' in o)) return toCloud(o);
   if (typeof o.reportId === 'string' && Array.isArray(o.files) && isObj(o.score) && num(o.score.overall) !== undefined) return toReport(o, o.score);
   if (Array.isArray(o.stages)) {
     return {

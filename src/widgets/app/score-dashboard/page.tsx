@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
 import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
 import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
+import { CloudView, WatchView } from '../../components/MonitorViews';
 import { PlanView } from '../../components/PlanView';
 import { ReportView } from '../../components/ReportView';
 import { VerifyView } from '../../components/VerifyView';
@@ -18,6 +19,7 @@ import '../parts.css';
 import '../report.css';
 import '../verify.css';
 import '../plan.css';
+import '../monitor.css';
 import './dashboard.css';
 
 const R = 52;
@@ -193,8 +195,11 @@ function useToolOutput(): unknown {
 }
 
 // Which step of the journey (Assess > Plan > Preview > Apply/Verify > Report) a result belongs to.
-function stepOf(vm: ViewModel): StepIndex {
+function stepOf(vm: ViewModel): StepIndex | null {
   switch (vm.kind) {
+    case 'watch':
+    case 'cloud':
+      return null;
     case 'plan':
       return 1;
     case 'apply':
@@ -230,6 +235,10 @@ function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | '
       return <VerifyView vm={vm} actions={actions} />;
     case 'plan':
       return <PlanView vm={vm} actions={actions} />;
+    case 'watch':
+      return <WatchView vm={vm} />;
+    case 'cloud':
+      return <CloudView vm={vm} />;
     case 'assessment':
       return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
     default:

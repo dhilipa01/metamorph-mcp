@@ -94,7 +94,15 @@ export function Wordmark() {
   return <span className="wordmark">metamorph</span>;
 }
 
-export function StepIndicator({ current }: { current: StepIndex }) {
+export function StepIndicator({ current }: { current: StepIndex | null }) {
+  // Monitoring views (watch, cloud) are not part of the assess to report flow: no step is highlighted.
+  if (current === null) {
+    return (
+      <nav className="steps" aria-label="Progress">
+        <p className="eyebrow steps-monitor">Monitor · not a step of assess, plan, apply and report</p>
+      </nav>
+    );
+  }
   return (
     <nav className="steps" aria-label="Progress">
       <ol>
@@ -154,7 +162,7 @@ export function Header({ meta, small, sw }: { meta: ShellMeta; small?: boolean; 
   );
 }
 
-export function Shell({ theme, layout, step, meta, sw, children }: { theme: ThemeName | null; layout: Layout; step: StepIndex; meta: ShellMeta; sw?: React.ReactNode; children: React.ReactNode }) {
+export function Shell({ theme, layout, step, meta, sw, children }: { theme: ThemeName | null; layout: Layout; step: StepIndex | null; meta: ShellMeta; sw?: React.ReactNode; children: React.ReactNode }) {
   // Inline style variables: the colour tokens survive even when the host blocks tokens.css.
   const vars = theme ? (tokensFor(theme) as React.CSSProperties) : undefined;
   return (
