@@ -109,7 +109,7 @@ def main():
         for name, view, fixture, theme, mode, w, h in SHOTS:
             if only and name not in only and not any(name.startswith(o) for o in only):
                 continue
-            ctx, page = open_page(browser, a.base, theme, mode, w, h, load_fixture(fixture), READY[view])
+            ctx, page = open_page(browser, a.base, theme, mode, w, h, load_fixture(fixture), READY[view], call_tool=(view == "plan"))
             path = out / (f"{name}.png" if view == "assessment" else f"{name}.webp")
             save(page, path, full_page=(mode == "full"))
             size = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight]")

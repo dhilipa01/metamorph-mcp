@@ -35,3 +35,6 @@
 .mm .bar > span { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); color: var(--text); }
 .mm .bar-measured > span { background: currentColor; }
 .mm .bar-projected > span { background: repeating-conic-gradient(currentColor 0% 25%, transparent 0% 50%) 0 0 / 4px 4px; box-shadow: inset 0 0 0 1.5px currentColor; }
+
+/* a projected numeral: outlined, with the dithered fill (the same pattern as the Projected legend swatch) */
+.mm .num-projected { color: transparent; -webkit-text-stroke: 2px var(--text); background: repeating-conic-gradient(var(--text) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px; -webkit-background-clip: text; background-clip: text; }

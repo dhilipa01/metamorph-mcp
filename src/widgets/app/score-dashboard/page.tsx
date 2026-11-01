@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
 import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
 import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
+import { PlanView } from '../../components/PlanView';
 import { ReportView } from '../../components/ReportView';
 import { VerifyView } from '../../components/VerifyView';
 import { Shell, ThemeSwitch, useLayout, useTheme, type StepIndex } from '../../components/Shell';
@@ -16,6 +17,7 @@ import '../mm.css';
 import '../parts.css';
 import '../report.css';
 import '../verify.css';
+import '../plan.css';
 import './dashboard.css';
 
 const R = 52;
@@ -139,92 +141,6 @@ function Apply({ vm }: { vm: ApplyVM }) {
   );
 }
 
-function Projection({ from, to }: { from?: number; to?: number }) {
-  if (to === undefined) return null;
-  return (
-    <div className="proj">
-      <p className="meta num">
-        Projected score{from !== undefined ? ` ${from} to ${to}` : `: ${to}`}
-      </p>
-      <div className="proj-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={to} aria-label={`Projected score ${to} out of 100`}>
-        <span className="proj-to" style={{ width: `${to}%` }} />
-        {from !== undefined && <span className="proj-from" style={{ width: `${Math.min(from, to)}%` }} />}
-      </div>
-    </div>
-  );
-}
-
-function StageItem({ s, before }: { s: StageVM; before?: number }) {
-  return (
-    <li className="step">
-      <span className="step-n" aria-hidden="true">
-        {s.index}
-      </span>
-      <div className="step-body">
-        <h3>
-          <span className="sr-only">Step {s.index}: </span>
-          {s.title}
-        </h3>
-        <div className="chips">
-          <span className={`chip risk-${s.risk}`}>
-            <SeverityIcon severity={s.risk === 'high' ? 'high' : s.risk === 'medium' ? 'medium' : 'low'} />
-            {s.risk[0].toUpperCase() + s.risk.slice(1)} risk
-          </span>
-          <span className={`chip ${s.automated ? 'neutral' : 'guided'}`}>{s.automated ? 'Automated' : 'Guided'}</span>
-          <span className="chip neutral cap">{s.kind}</span>
-        </div>
-        {s.steps.length > 0 && (
-          <ol className="steps-list">
-            {s.steps.map((t, i) => (
-              <li key={i}>{t}</li>
-            ))}
-          </ol>
-        )}
-        {s.rollback && (
-          <details>
-            <summary>Rollback</summary>
-            <div className="detail-body">{s.rollback}</div>
-          </details>
-        )}
-        <Projection from={before} to={s.scoreAfter} />
-      </div>
-    </li>
-  );
-}
-
-function Plan({ vm }: { vm: PlanVM }) {
-  const path = [vm.scoreBefore, ...vm.stages.map((s) => s.scoreAfter)].filter((n): n is number => n !== undefined);
-  return (
-    <>
-      <div className="card">
-        <p className="meta">
-          Goal: <span className="mono">{vm.goal}</span> · Stack: <span className="mono">{vm.stack}</span>
-        </p>
-        {path.length > 0 && (
-          <p className="journey" aria-label={`Projected score path ${path.join(' to ')}`}>
-            {path.join(' → ')}
-          </p>
-        )}
-        {vm.scoreAfter !== undefined && <Projection from={vm.scoreBefore} to={vm.scoreAfter} />}
-      </div>
-      <section aria-labelledby="sd-stages">
-        <h2 id="sd-stages">Plan stages</h2>
-        {vm.stages.length === 0 ? (
-          <div className="card muted">No stages: nothing to modernize for this goal.</div>
-        ) : (
-          <ol className="stepper">
-            {vm.stages.map((s, i) => (
-              <StageItem key={s.id} s={s} before={i === 0 ? vm.scoreBefore : vm.stages[i - 1].scoreAfter} />
-            ))}
-          </ol>
-        )}
-        {vm.hint && <p className="meta" style={{ marginTop: 12 }}>{vm.hint}</p>}
-      </section>
-    </>
-  );
-}
-
-// A render error must be visible, never a blank or a fallback to the empty state.
 class ResultBoundary extends React.Component<{ raw: unknown; children: React.ReactNode }, { error?: string }> {
   state: { error?: string } = {};
   static getDerivedStateFromError(e: unknown) {
@@ -297,7 +213,7 @@ function Legacy({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
   return (
     <div className="sd">
       <h1>{title}</h1>
-      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : null}
+      {vm.kind === 'apply' ? <Apply vm={vm} /> : null}
     </div>
   );
 }
@@ -312,6 +228,8 @@ function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | '
       return <ReportView vm={vm} actions={actions} />;
     case 'verify':
       return <VerifyView vm={vm} actions={actions} />;
+    case 'plan':
+      return <PlanView vm={vm} actions={actions} />;
     case 'assessment':
       return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
     default:
