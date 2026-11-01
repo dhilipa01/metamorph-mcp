@@ -297,6 +297,7 @@ describe('no other caller-controlled location, no new outbound host', () => {
       'github.com', // links and parsing only
       'google.github.io', // doc link in the report
       'json.schemastore.org', // SARIF schema id
+      'localhost', // loopback address shown for local runs and used by the dashboard proxy to reach its own /mcp, never a caller-controlled target
       'metamorph.example.com', // example in comments
       'nodejs.org',
       'owasp.org', // doc links in the report

@@ -177,7 +177,8 @@ describe('extractTarGz directory cache', () => {
     const entries: Entry[] = [{ name: 'r/dup.txt', data: 'a' }, { name: 'r/dup.txt', data: 'b' }];
     for (let i = 0; i < 100; i++) entries.push({ name: `r/n${i}.txt`, data: 'x' });
     await expect(extractTarGz(tgz(entries), dest)).rejects.toThrow();
-    expect(await fs.readFile(path.join(dest, 'dup.txt'), 'utf8')).toBe('a');
+    // two parallel 'wx' writes of the same path: exactly one wins, which one is a race
+    expect(['a', 'b']).toContain(await fs.readFile(path.join(dest, 'dup.txt'), 'utf8'));
   });
 
   it('still honours the file and byte limits with parallel writes', async () => {
