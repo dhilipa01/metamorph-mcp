@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests/fixtures/widget"
 # what to wait for before the screenshot, per view
-READY = {"assessment": ".numeral", "report": "[data-view=report]", "verify": "[data-view=verify]", "plan": "[data-view=plan]", "apply": "[data-view=apply]"}
+READY = {"assessment": ".numeral", "report": "[data-view=report]", "verify": "[data-view=verify]", "plan": "[data-view=plan]", "apply": ".sd"}
 SHOTS = [
     # name, view, fixture, theme, mode, width, height
     ("assessment-light-1920x1080", "assessment", "assessment", "light", "full", 1920, 1080),
