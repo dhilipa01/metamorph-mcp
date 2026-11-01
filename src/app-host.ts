@@ -204,13 +204,14 @@ function init(){
     return post({jsonrpc:'2.0',method:'notifications/initialized'}).catch(function(){});
   });
 }
-function textOf(res){
+function fullText(res){
   var c=res&&res.content;if(!Array.isArray(c))return'';
-  return c.filter(function(x){return x&&x.type==='text'&&typeof x.text==='string'}).map(function(x){return x.text}).join(' ').slice(0,400);
+  return c.filter(function(x){return x&&x.type==='text'&&typeof x.text==='string'}).map(function(x){return x.text}).join(' ');
 }
+function textOf(res){return fullText(res).slice(0,400)}
 function outputOf(res){
   if(res&&res.structuredContent)return res.structuredContent;
-  try{return JSON.parse(textOf(res))}catch(e){return null}
+  try{return JSON.parse(fullText(res))}catch(e){return null}
 }
 function callTool(name,args,from){
   var p=callPolicy(name,from,canWrite,TOOLS);
@@ -264,7 +265,7 @@ function chain(step){
     return exec('preview_changes',Object.assign({goal:g,stage:st.id},b),'preview').then(function(pv){
       if(step==='preview')return pv;
       var tok=pv&&pv.approvalToken;
-      if(!tok)throw new Error('The preview returned no approval token.');
+      if(!tok)throw new Error('The preview returned no approval token, so this server cannot apply or verify (the operator must set METAMORPH_TOKEN_SECRET).');
       var tool=step==='apply'?'apply_stage':'verify_patch';
       say('Running '+tool+' ...');
       return exec(tool,Object.assign({goal:g,stage:st.id,approval_token:tok},b),step);
