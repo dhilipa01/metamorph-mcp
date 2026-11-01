@@ -39,13 +39,14 @@ describe('GET /app route and page', () => {
   });
   it('CSP hashes match the inline style and script', () => {
     const csp = appCsp();
-    expect(csp).toContain(sha(APP_CSS));
+    expect(csp).toMatch(/script-src ('sha256-[^']+' ?)+;/);
+    expect(csp).not.toMatch(/script-src[^;]*unsafe/);
     expect(csp).toContain(sha(APP_JS));
     expect(csp).toContain(sha(SHIM));
     const html = renderApp();
     expect(html).toContain(`<style>${APP_CSS}</style>`);
     expect(html).toContain(`<script>${APP_JS}</script>`);
-    expect(html.replace(`<script>${APP_JS}</script>`, '')).not.toContain('<script');
+    expect(html.replace(`<script>${APP_JS}</script>`, '').replace(/<script type="text\/plain" id="wcss">[\s\S]*?<\/script>/, '')).not.toContain('<script');
   });
   it('has no external URLs, no storage, no key material; the key field is a password input', () => {
     const html = renderApp();

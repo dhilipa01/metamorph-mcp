@@ -108,6 +108,7 @@ iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(
 #busy.on{display:flex}
 #status{grid-column:1/3;padding:8px 20px;border-top:1px solid var(--line);background:var(--card);font-size:13px;min-height:36px}
 #status.err{color:var(--accent);font-weight:700}
+@media (max-height:780px){aside{gap:6px;padding:10px 20px}svg.logo{width:32px;height:32px}h1{font-size:22px}.sub{display:none}input,select{padding:5px 9px}.f{margin-top:6px}li button{padding:5px 12px}ol{gap:4px}button.primary{padding:7px 12px}}
 @media (max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto 70vh auto}#status{grid-column:1}}
 `.trim();
 
@@ -191,7 +192,7 @@ function mount(){
   return init().then(function(){return rpc('resources/read',{uri:WIDGET})}).then(function(r){
     var c=r&&r.contents&&r.contents[0];var h=c&&typeof c.text==='string'?c.text:'';
     if(!h)throw new Error('The server returned no widget HTML.');
-    var tag='<script>'+SHIM+'<\\/script>';
+    var ce=$('wcss'),tag='<style>'+(ce?ce.textContent:'')+'</style><script>'+SHIM+'<\\/script>';
     frame=document.createElement('iframe');
     frame.setAttribute('sandbox','allow-scripts');
     frame.setAttribute('title','Metamorph score dashboard');
@@ -263,7 +264,8 @@ refresh();
 const sha = (s: string) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
 
 // The widget is served by the SDK from the same bundled file (resources/read). The iframe inherits this page's CSP, so
-// the CSP must allow that file's inline scripts and styles: hash them from the file the SDK reads.
+// the CSP must allow that file's inline scripts: hash them from the file the SDK reads. Styles use 'unsafe-inline':
+// the widget injects its CSS at runtime (React), which no fixed hash can cover; scripts stay hash-only.
 export function widgetHashes(cwd: string = process.cwd()): { script: string[]; style: string[] } {
   const file = ['src/widgets/out', 'dist/widgets/out', 'widgets/out'].map((d) => join(cwd, d, 'score-dashboard.html')).find((p) => existsSync(p));
   if (!file) return { script: [], style: [] };
@@ -275,11 +277,17 @@ export function widgetHashes(cwd: string = process.cwd()): { script: string[]; s
 export function appCsp(cwd?: string): string {
   const w = widgetHashes(cwd);
   const script = [sha(JS), sha(SHIM), ...w.script].join(' ');
-  const style = [sha(CSS), ...w.style].join(' ');
-  return `default-src 'none'; style-src ${style}; script-src ${script}; connect-src 'self'; frame-src 'self' blob:; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+  return `default-src 'none'; style-src 'unsafe-inline'; script-src ${script}; connect-src 'self'; frame-src 'self' blob:; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 }
 
 export { CSS as APP_CSS, JS as APP_JS };
+
+// The bundled widget page (what resources/read returns) has no stylesheet: the build writes it next to the HTML as
+// score-dashboard.css. The host embeds that file as inert data and adds it to the iframe document.
+export function widgetCss(cwd: string = process.cwd()): string {
+  const file = ['src/widgets/out', 'dist/widgets/out', 'widgets/out'].map((d) => join(cwd, d, 'score-dashboard.css')).find((p) => existsSync(p));
+  return file ? readFileSync(file, 'utf-8').replace(/<\//g, '<\\/') : '';
+}
 
 export function renderApp(): string {
   const e = escapeHtml;
@@ -307,6 +315,7 @@ ${step('assess', 1, 'Assess')}${step('plan', 2, 'Plan')}${step('preview', 3, 'Pr
 </aside>
 <main id="main"><div id="empty">Enter a repository and key, then run Assess.<br>The real dashboard widget appears here.</div><div id="busy">Working...</div></main>
 <div id="status" role="status" aria-live="polite">Ready.</div>
+<script type="text/plain" id="wcss">${widgetCss()}</script>
 <script>${JS}</script></body></html>`;
 }
 

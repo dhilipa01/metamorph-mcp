@@ -62,6 +62,7 @@ Used
 - MCP Apps widget: one widget, `score-dashboard`, shared by `assess_project`, `plan_modernization`, `apply_stage`, `verify_patch` and `generate_report`. Views: assessment, plan, apply, verify, report, plus fallback cards for empty and unrecognised results.
 - Signed HTTP downloads: `GET /reports/<id>.<pdf|sarif|cdx.json>?t=<token>` on the same server as `/mcp`.
 - Auth and scopes: Bearer key, three cumulative scopes, a guard on every tool.
+- Browser dashboard at `/app`: paste a key, run Assess, Plan, Preview and Report and see the real widget views (the key stays in the tab).
 - Transport: Streamable HTTP at `/mcp`, health check at `/mcp/health`.
 
 - Prompts: `modernize`, `cve-triage`, `watch-repo` (guided tool sequences; text only, they call nothing themselves). Listed and fetched over MCP locally; not yet confirmed in NitroStudio.
