@@ -52,7 +52,7 @@
   --step-5: clamp(2.4rem, 1.9rem + 2.2vw, 3.05rem);    /* 49 */
   --step-hero: clamp(6rem, 2rem + 8vw, 11rem);      /* the score numeral */
   --lh-tight: 1.1;
-  --lh-body: 1.45;
+  --lh-body: 1.5;
   --track-wide: 0.22em; /* wordmark and small caps labels */
 
   /* ---- space: 4px base, used for margins, gaps and padding ---- */
@@ -113,7 +113,7 @@
 /* ---- colour: DARK. The theme attribute wins; without one the OS preference decides. ---- */
 .mm[data-theme="dark"] {
   --base: #151614;       /* charcoal, never true black */
-  --panel: #1E3527;      /* forest green */
+  --panel: #1A211C;      /* charcoal with a restrained forest tint (low saturation, low lightness) */
   --accent: #D1344A;     /* crimson */
   --on-accent: #FFF3EE;
   --accent-ink: #F0788C;
@@ -133,7 +133,7 @@
 @media (prefers-color-scheme: dark) {
   .mm:not([data-theme]) {
     --base: #151614;
-    --panel: #1E3527;
+    --panel: #1A211C;
     --accent: #D1344A;
     --on-accent: #FFF3EE;
     --accent-ink: #F0788C;

@@ -51,12 +51,32 @@ describe('GET /app route and page', () => {
   it('has no external URLs, no storage, no key material; the key field is a password input', () => {
     const html = renderApp();
     expect(html.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')).not.toMatch(/https?:\/\/(?!github\.com\/)/);
-    expect(html).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/);
+    expect(html).not.toMatch(/sessionStorage|document\.cookie|indexedDB/);
+    // localStorage only holds two UI preferences (sidebar, theme), always inside try/catch, never the key.
+    expect([...html.matchAll(/localStorage\.(?:set|get)Item\(([^,)]*)/g)].map((m) => m[1])).toEqual(['k', 'k']);
     expect(html).toContain('type="password"');
     expect(html).toContain('Your key stays in this tab and is sent only to this server.');
     expect(html).toContain("sandbox','allow-scripts'");
     expect(html).not.toContain('allow-same-origin');
     expect(html).not.toMatch(/Bearer [A-Za-z0-9_-]{8,}/);
+  });
+  it('the page script is valid JavaScript', () => {
+    expect(() => new Function(APP_JS)).not.toThrow();
+  });
+  it('has a collapsible sidebar, a theme switch, six clickable stages and deep links', () => {
+    const html = renderApp();
+    expect(html).toContain('id="collapse"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('id="theme"');
+    for (const s of ['assess', 'plan', 'preview', 'apply', 'verify', 'report']) {
+      expect(html).toContain(`id="s-${s}"`);
+      expect(html).not.toMatch(new RegExp(`id="s-${s}"><button[^>]*disabled`));
+    }
+    expect(html).toContain('location.hash');
+    expect(html).toContain('mm-host-sidebar');
+    expect(html).toContain('mm-host-theme');
+    expect(html).toContain('<details class="about">');
+    expect(html).toContain('Rate limited.');
   });
   it('landing links to /app', () => {
     expect(renderLanding('http://localhost/mcp')).toContain('href="/app"');

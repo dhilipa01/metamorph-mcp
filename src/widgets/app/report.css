@@ -3,22 +3,22 @@
 .mm .rp-head { align-items: flex-end; margin-bottom: var(--s-3); }
 .mm .rp-expiry { display: flex; align-items: baseline; gap: var(--s-3); }
 .mm .clock { font-family: var(--font-serif); font-size: var(--step-3); line-height: 1; display: inline-block; min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums lining-nums; }
-.mm .rp-files { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-6); align-items: start; }
+.mm .rp-files { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-7); align-items: start; }
 .mm .rp-list { border-top: var(--rule-w) solid var(--rule-strong); }
-.mm .rp-file { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) auto; gap: var(--s-4); align-items: start; padding: var(--s-3) 0; border-bottom: var(--rule-w) solid var(--rule); }
+.mm .rp-file { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr) auto; gap: var(--s-5); align-items: start; padding: var(--s-5) 0; border-bottom: var(--rule-w) solid var(--rule); }
 .mm .rp-fmt { border: 1px solid var(--rule-strong); text-align: center; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; padding: 0.2rem 0; margin-top: 0.2rem; }
 .mm .rp-name { font-size: var(--step-1); font-weight: 600; line-height: 1.2; }
-.mm .rp-what { font-size: var(--step--1); color: var(--muted); margin-top: var(--s-1); max-width: 38rem; }
+.mm .rp-what { font-size: var(--step--1); color: var(--muted); margin-top: var(--s-2); max-width: 38rem; }
 .mm .rp-meta { font-size: var(--step--1); color: var(--muted); margin-top: var(--s-1); overflow-wrap: anywhere; }
 .mm .rp-size { color: var(--text); margin-left: var(--s-2); }
-.mm .rp-act { display: flex; flex-direction: column; align-items: stretch; gap: var(--s-1); min-width: 9rem; }
+.mm .rp-act { display: flex; flex-direction: column; align-items: stretch; gap: var(--s-4); min-width: 9rem; }
 .mm .rp-act .btn { min-height: 3rem; width: 100%; padding: 0 var(--s-4); }
-.mm .rp-top li { display: grid; grid-template-columns: 2.4rem auto minmax(0, 1fr); gap: var(--s-3); align-items: baseline; padding: var(--s-2) 0; border-bottom: var(--rule-w) solid var(--rule); }
+.mm .rp-top li { display: grid; grid-template-columns: 2.4rem auto minmax(0, 1fr); gap: var(--s-4); align-items: baseline; padding: var(--s-4) 0; border-bottom: var(--rule-w) solid var(--rule); }
 .mm .rank-sm { font-size: var(--step-2); }
 .mm .rp-top .fr-sev svg { color: var(--sev); }
 .mm .rp-top-title { overflow-wrap: anywhere; }
-.mm .rp-limits li { color: var(--text); font-size: var(--step--1); padding: var(--s-1) 0; max-width: 56rem; }
-.mm .rp-again { display: flex; flex-direction: column; gap: var(--s-2); }
+.mm .rp-limits li { color: var(--text); font-size: var(--step--1); padding: var(--s-2) 0; max-width: 56rem; }
+.mm .rp-again { display: flex; flex-direction: column; gap: var(--s-4); }
 .mm .rp-call { overflow-wrap: anywhere; flex: 1 1 14rem; min-width: 0; }
 
 /* cover preview: a stylised A4 page drawn in CSS from the real score and counts (an illustration, captioned as one) */
