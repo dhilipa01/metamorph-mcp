@@ -15,6 +15,7 @@ import { AppModule } from './app.module.js';
 import { registerReportRoutes, type AppLike } from './modules/report/download.js';
 import { installLanding, type LandingApp } from './landing.js';
 import { installAppHost, type AppHostApp } from './app-host.js';
+import { inlineWidgetCss } from './widget-css.js';
 import { installValidationDeferral } from './common/sdk-validation.js';
 
 /**
@@ -25,6 +26,7 @@ async function bootstrap() {
   const server = await McpApplicationFactory.create(AppModule);
   // Tools validate their own input after the auth guard (friendly messages); let the SDK's schema failure pass to them.
   await installValidationDeferral(server);
+  inlineWidgetCss(process.cwd(), (m) => console.warn(m));
   await server.start();
   // Signed report downloads live on the same Express app as /mcp. STDIO-only runs have no HTTP transport and no links.
   const http = server.getHttpTransport?.();
