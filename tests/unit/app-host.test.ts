@@ -60,6 +60,9 @@ describe('GET /app route and page', () => {
     expect(html).not.toContain('allow-same-origin');
     expect(html).not.toMatch(/Bearer [A-Za-z0-9_-]{8,}/);
   });
+  it('the page script is valid JavaScript', () => {
+    expect(() => new Function(APP_JS)).not.toThrow();
+  });
   it('has a collapsible sidebar, a theme switch, six clickable stages and deep links', () => {
     const html = renderApp();
     expect(html).toContain('id="collapse"');

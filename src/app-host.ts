@@ -319,7 +319,6 @@ var t0=recall('mm-host-theme');setTheme(t0==='light'||t0==='dark'?t0:'auto',fals
 setRail(recall('mm-host-sidebar')==='rail'&&matchMedia('(min-width:761px)').matches,false);
 var h0=location.hash.slice(1);
 if(STAGES.indexOf(h0)>=0){cur=h0;refresh();if(ready())run(h0)}else refresh();
-})();refresh();
 })();`;
 
 const sha = (s: string) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
