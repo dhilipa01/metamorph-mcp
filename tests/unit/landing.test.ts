@@ -74,7 +74,7 @@ describe('landing page', () => {
     handleLanding(reqWith({ host: '"><script>alert(1)</script>', 'x-forwarded-proto': 'javascript' }), r.res);
     expect(r.out.body).not.toContain('<script>alert(1)');
     expect(r.out.body).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(r.out.body).toContain('http://');
+    expect(r.out.body).toMatch(/https?:\/\//);
   });
   it('honours X-Forwarded-Proto and X-Forwarded-Host', () => {
     const r = fakeRes();
@@ -152,5 +152,29 @@ describe('prompts', () => {
     expect(data('a\n"b"')).toBe('"a \\"b\\""');
     expect(data(undefined)).toBe('not given');
     expect(data('x'.repeat(1000)).length).toBe(302);
+  });
+});
+
+describe('endpoint line', () => {
+  const req = (host: string, extra: Record<string, string> = {}) => ({ headers: { host, ...extra }, protocol: 'http' }) as never;
+
+  it('uses https for a non-local host when the proxy sends no forwarded protocol', async () => {
+    const { endpointFor } = await import('../../src/landing.js');
+    expect(endpointFor(req('app.example.com'))).toBe('https://app.example.com/mcp');
+    expect(endpointFor(req('localhost:3190'))).toBe('http://localhost:3190/mcp');
+  });
+
+  it('prefers a valid METAMORPH_PUBLIC_URL and ignores one with credentials', async () => {
+    const { endpointFor } = await import('../../src/landing.js');
+    const before = process.env.METAMORPH_PUBLIC_URL;
+    try {
+      process.env.METAMORPH_PUBLIC_URL = 'https://public.example.com/';
+      expect(endpointFor(req('other.example.com'))).toBe('https://public.example.com/mcp');
+      process.env.METAMORPH_PUBLIC_URL = 'https://user:pw@public.example.com';
+      expect(endpointFor(req('other.example.com'))).toBe('https://other.example.com/mcp');
+    } finally {
+      if (before === undefined) delete process.env.METAMORPH_PUBLIC_URL;
+      else process.env.METAMORPH_PUBLIC_URL = before;
+    }
   });
 });

@@ -127,10 +127,27 @@ function header(req: Req, name: string): string {
   return (Array.isArray(v) ? v[0] : v ?? '').split(',')[0].trim();
 }
 
+// Public origin set by the deployment owner (same variable the report links use): http(s) only, no credentials/query.
+function publicOrigin(): string | undefined {
+  const raw = process.env.METAMORPH_PUBLIC_URL?.trim();
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password) return undefined;
+    return u.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function endpointFor(req: Req): string {
+  const configured = publicOrigin();
+  if (configured) return `${configured}/mcp`;
   const fp = header(req, 'x-forwarded-proto').toLowerCase();
-  const proto = fp === 'http' || fp === 'https' ? fp : req.protocol === 'https' ? 'https' : 'http';
   const host = (header(req, 'x-forwarded-host') || header(req, 'host') || 'localhost').slice(0, 255);
+  // NitroCloud's proxy does not send x-forwarded-proto: a non-local host behind it is served over https.
+  const local = /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$/i.test(host);
+  const proto = fp === 'http' || fp === 'https' ? fp : req.protocol === 'https' || !local ? 'https' : 'http';
   return `${proto}://${host}/mcp`;
 }
 
