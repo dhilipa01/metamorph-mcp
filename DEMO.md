@@ -11,8 +11,8 @@ Time budget: 12 + 28 + 20 + 30 + 20 + 20 + 20 + 20 = 170 s (2:50).
 
 ## Pre-flight checklist
 - [ ] NitroCloud dashboard, app `metamorph`: latest deployment is Live
-- [ ] `curl -s -o /dev/null -w "%{http_code}\n" <DEPLOYED_URL>/mcp/health` prints 200
-- [ ] `METAMORPH_URL=<DEPLOYED_URL> METAMORPH_KEY=<write key> scripts/smoke.sh` ends with `OVERALL: PASS` (key stays in the shell, never on screen)
+- [ ] `curl -s -o /dev/null -w "%{http_code}\n" https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/mcp/health` prints 200
+- [ ] `METAMORPH_URL=https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai METAMORPH_KEY=<write key> scripts/smoke.sh` ends with `OVERALL: PASS` (key stays in the shell, never on screen)
 - [ ] Host env has `METAMORPH_TOKEN_SECRET` (32+ chars) and `METAMORPH_PUBLIC_URL` set to the deployed origin, so the preview returns a token and report links are clickable
 - [ ] Studio server URL ends in `/mcp`; Authentication is Bearer; two server entries added: one with the write key, one with a read key (for the 403 in beat 7)
 - [ ] Ports 3001 and 3002 free if any local Studio project is open: `ss -ltnp | grep -E ":(3001|3002)"`

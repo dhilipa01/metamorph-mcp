@@ -32,9 +32,9 @@ Scope today: upgrade, not rewrite. Public GitHub repos only.
 1. **Try it with no AI client.** Open `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app`, paste a key (it stays in the tab), run Assess, Plan, Preview and Report.
 2. **Get a key.** Keys are issued by the deployment owner (no public sign-up). `read` runs everything except `plan_modernization` (`plan`) and `apply_stage` / `verify_patch` (`write`). Ask for `plan` at least.
 3. **Connect your agent.**
-   - URL `https://<deployment-host>/mcp` (must end in `/mcp`), header `Authorization: Bearer <YOUR_API_KEY>`.
+   - URL `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/mcp` (must end in `/mcp`), header `Authorization: Bearer <YOUR_API_KEY>`.
    - NitroStudio: Add Server, Other Project, Connection Type HTTP (Streamable HTTP), paste the URL, Authentication Bearer Token, paste the key.
-   - Check: `curl -s -o /dev/null -w "%{http_code}\n" https://<deployment-host>/mcp/health` prints `200`.
+   - Check: `curl -s -o /dev/null -w "%{http_code}\n" https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/mcp/health` prints `200`.
 4. **First call**, `assess_project`:
    ```json
    { "repo_url": "https://github.com/dhilipa01/metamorph-demo-legacy", "subfolder": "php-shop" }
@@ -43,7 +43,7 @@ Scope today: upgrade, not rewrite. Public GitHub repos only.
 5. **Next:** `plan_modernization` with `"goal": "patch_advisory"`, then `preview_changes` with `"stage": "patch-dependencies"` (copy the stage id from the plan). It returns a diff and an `approvalToken`; `apply_stage` (write key) must be called within 300 s.
 6. **Optional:** `check_watch` with `{ "cve_ids": ["CVE-2021-44228"], "products": ["php@8.1"] }`.
 
-Errors name the next step: `401` wrong or missing key, `403` scope too low. Smoke test a deployment: `METAMORPH_URL=https://<deployment-host> scripts/smoke.sh` (add `METAMORPH_KEY` for authenticated checks).
+Errors name the next step: `401` wrong or missing key, `403` scope too low. Smoke test a deployment: `METAMORPH_URL=https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai scripts/smoke.sh` (add `METAMORPH_KEY` for authenticated checks).
 
 ## Tools
 
