@@ -6,6 +6,7 @@ import { LOGO_D64 } from './landing-logo.js';
 
 export const REPO_URL = 'https://github.com/dhilipa01/metamorph-mcp';
 export const README_URL = `${REPO_URL}#readme`;
+const VERSION = '1.0.0';
 
 // Keep in step with the @Tool decorators: tests/unit/landing.test.ts compares this table with the source.
 export const TOOLS: ReadonlyArray<{ name: string; scope: 'read' | 'plan' | 'write'; purpose: string }> = [
@@ -27,87 +28,169 @@ export const RESOURCES: ReadonlyArray<{ uri: string; purpose: string }> = [
   { uri: 'metamorph://aws/readonly-role.yaml', purpose: 'CloudFormation template for the read-only role used by cloud_inventory.' }
 ];
 
-// Mirrors the labels in docs/EVIDENCE.md.
-export const EVIDENCE: ReadonlyArray<{ item: string; label: 'LIVE' | 'FIXTURE' | 'EMULATOR' | 'PROJECTED' | 'NOT BUILT'; note: string }> = [
-  { item: 'assess_project, analyze_advisory, check_watch', label: 'LIVE', note: 'Real public feeds. Scoring rules are our own.' },
-  { item: 'plan_modernization, preview_changes', label: 'LIVE', note: 'Real diffs on real fetched repos.' },
-  { item: 'generate_report, signed downloads', label: 'LIVE', note: 'PDF, SARIF and SBOM. GitHub code scanning acceptance not tested.' },
-  { item: 'MCP prompts', label: 'LIVE', note: 'Local only; not yet confirmed in NitroStudio.' },
-  { item: 'apply_stage', label: 'PROJECTED', note: 'Real patch, simulated re-score.' },
-  { item: 'verify_patch', label: 'FIXTURE', note: 'Tested against a fake GitHub, not yet live through this server.' },
-  { item: 'cloud_inventory (AWS)', label: 'EMULATOR', note: 'Moto only; no real AWS account.' },
-  { item: 'Private repos, PR creation, tickets, Azure', label: 'NOT BUILT', note: 'Public GitHub repos only.' }
-];
-
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 const CSS = `
-:root{--bg:#D5DAD0;--card:#EFE7D6;--ink:#1B1D19;--mute:#555A50;--accent:#6B1F2A;--line:#1B1D1933;color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#151614;--card:#1E3527;--ink:#ECE9DF;--mute:#A9AFA2;--accent:#D1344A;--line:#ECE9DF33;color-scheme:dark}}
-:root[data-theme=dark]{--bg:#151614;--card:#1E3527;--ink:#ECE9DF;--mute:#A9AFA2;--accent:#D1344A;--line:#ECE9DF33;color-scheme:dark}
+:root{--bg:#D5DAD0;--card:#EFE7D6;--panel:#E3E6DC;--ink:#1B1D19;--mute:#555A50;--accent:#6B1F2A;--onacc:#F6F1E4;--line:#1B1D1938;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#151614;--card:#1E3527;--panel:#1A1C19;--ink:#ECE9DF;--mute:#A9AFA2;--accent:#D1344A;--onacc:#151614;--line:#ECE9DF2B;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#151614;--card:#1E3527;--panel:#1A1C19;--ink:#ECE9DF;--mute:#A9AFA2;--accent:#D1344A;--onacc:#151614;--line:#ECE9DF2B;color-scheme:dark}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Helvetica Neue",Helvetica,Arial,"Liberation Sans",system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:40px 24px 64px}
-header{display:flex;align-items:center;gap:20px;margin-bottom:8px}
-svg.logo{width:72px;height:72px;flex:none;color:var(--accent)}
-h1{font:700 44px/1.05 "Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:-.02em;margin:0}
-.lede{font-size:19px;color:var(--mute);margin:8px 0 0}
-.top{margin-left:auto}
-button{font:inherit;font-size:13px;color:var(--ink);background:none;border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
-h2{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:40px 0 12px}
-.card{background:var(--card);border-radius:6px;padding:18px 20px}
-code,pre{font:14px/1.4 ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
-pre{margin:0;overflow-x:auto;white-space:pre-wrap;word-break:break-all}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Helvetica Neue",Helvetica,Arial,"Liberation Sans",system-ui,sans-serif}
+.w{max-width:1200px;margin:0 auto;padding:0 40px}
+a{color:inherit}
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+.bar .w{display:flex;align-items:center;gap:24px;height:72px}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:700;font-size:20px;letter-spacing:-.01em}
+svg.logo{width:36px;height:36px;flex:none;color:var(--accent)}
+nav{display:flex;gap:32px;margin:0 auto}
+nav a{text-decoration:none;color:var(--mute);font-size:15px}
+nav a:hover{color:var(--ink)}
+.right{display:flex;align-items:center;gap:16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 24px;border-radius:6px;font:inherit;font-size:15px;font-weight:600;text-decoration:none;cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink)}
+.btn.p{background:var(--accent);border-color:var(--accent);color:var(--onacc)}
+.btn.sm{padding:0 16px;font-weight:500}
+.btn:focus-visible,a:focus-visible,[role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hero{padding:96px 0 64px}
+.hero .w{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:64px;align-items:center}
+h1{font:400 56px/1.1 Georgia,"Times New Roman","Liberation Serif",serif;letter-spacing:-.015em;margin:0}
+.sub{font-size:19px;color:var(--mute);margin:24px 0 40px}
+.acts{display:flex;flex-wrap:wrap;gap:16px}
+.card{background:var(--card);border-radius:10px;padding:32px}
+.card h3{font:400 24px/1.3 Georgia,"Times New Roman",serif;margin:0 0 8px}
+.stages{list-style:none;margin:16px 0 0;padding:0}
+.stages a{display:flex;gap:16px;align-items:baseline;padding:16px 0;border-top:1px solid var(--line);text-decoration:none}
+.stages a:hover b{text-decoration:underline}
+.stages i{font-style:normal;color:var(--mute);width:16px;flex:none}
+.stages span{color:var(--mute);font-size:15px;margin-left:auto;text-align:right}
+section{padding:48px 0}
+h2{font:400 36px/1.2 Georgia,"Times New Roman",serif;margin:0 0 8px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin:0 0 16px}
+.lead{color:var(--mute);margin:0 0 32px;max-width:680px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:32px}
+[role=tablist]{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--line);margin-bottom:24px}
+[role=tab]{font:inherit;font-size:15px;min-height:44px;padding:0 16px;background:none;border:0;border-bottom:2px solid transparent;color:var(--mute);cursor:pointer;margin-bottom:-1px}
+[role=tab][aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+[role=tabpanel][hidden]{display:none}
+.lbl{font-size:13px;color:var(--mute);margin:0 0 8px}
+.code{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;border:1px solid var(--line);border-radius:6px;padding:16px 16px 16px 20px;margin:0 0 24px}
+code,pre{font:14px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+pre{margin:0;overflow-x:auto;white-space:pre-wrap;word-break:break-all;flex:1}
+.note{font-size:15px;color:var(--mute);margin:0 0 16px}
+.z{margin:0}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
 table{border-collapse:collapse;width:100%}
-th,td{text-align:left;padding:8px 10px 8px 0;border-bottom:1px solid var(--line);vertical-align:top;font-size:15px}
-th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);font-weight:600}
+th,td{text-align:left;padding:16px 24px 16px 0;border-bottom:1px solid var(--line);vertical-align:top;font-size:15px}
+th{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600}
 td.n{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;white-space:nowrap}
-.big{font-family:Georgia,"Times New Roman",serif;font-size:28px;line-height:1}
-.first{margin:0 0 8px}
-.note{font-size:15px;color:var(--mute)}
-a{color:var(--accent)}
-footer{margin-top:40px;font-size:14px;color:var(--mute)}
-@media (max-width:640px){h1{font-size:32px}main{padding:24px 16px 48px}svg.logo{width:52px;height:52px}td.n{white-space:normal}}
+.res{margin:24px 0 0;color:var(--mute);font-size:15px}
+.res b{color:var(--ink)}
+footer{border-top:1px solid var(--line);margin-top:48px;padding:32px 0 48px;font-size:14px;color:var(--mute)}
+footer .w{display:flex;gap:24px;flex-wrap:wrap}
+@media (max-width:900px){.hero .w,.grid3{grid-template-columns:1fr}.hero{padding:56px 0 32px}h1{font-size:40px}nav{display:none}.right{margin-left:auto}.w{padding:0 24px}section{padding:32px 0}}
+@media (max-width:560px){.bar .btn.p{display:none}td.n{white-space:normal}}
 `.trim();
 
-const JS = `(function(){var r=document.documentElement,b=document.getElementById('theme');try{var t=localStorage.getItem('metamorph-theme');if(t==='light'||t==='dark')r.setAttribute('data-theme',t)}catch(e){}if(b)b.addEventListener('click',function(){var dark=r.getAttribute('data-theme')==='dark'||(!r.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme: dark)').matches);var n=dark?'light':'dark';r.setAttribute('data-theme',n);try{localStorage.setItem('metamorph-theme',n)}catch(e){}})})();`;
+const JS = `(function(){var r=document.documentElement,b=document.getElementById('theme'),M=['auto','light','dark'],m='auto';function ap(){if(m==='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',m);if(b)b.textContent='Theme: '+m}try{var t=localStorage.getItem('metamorph-theme');if(t==='light'||t==='dark')m=t}catch(e){}ap();if(b)b.addEventListener('click',function(){m=M[(M.indexOf(m)+1)%3];ap();try{if(m==='auto')localStorage.removeItem('metamorph-theme');else localStorage.setItem('metamorph-theme',m)}catch(e){}});var tabs=[].slice.call(document.querySelectorAll('[role=tab]'));function sel(t,f){tabs.forEach(function(x){var on=x===t;x.setAttribute('aria-selected',on?'true':'false');x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on});if(f)t.focus()}tabs.forEach(function(t,i){t.addEventListener('click',function(){sel(t)});t.addEventListener('keydown',function(e){var k=e.key,n=-1;if(k==='ArrowRight')n=(i+1)%tabs.length;else if(k==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;else if(k==='Home')n=0;else if(k==='End')n=tabs.length-1;if(n>=0){e.preventDefault();sel(tabs[n],true)}})});[].forEach.call(document.querySelectorAll('[data-copy]'),function(c){c.addEventListener('click',function(){var s=document.getElementById(c.getAttribute('data-copy')).textContent;function ok(){var o=c.textContent;c.textContent='Copied';setTimeout(function(){c.textContent=o},1500)}function fb(){var a=document.createElement('textarea');a.value=s;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){}document.body.removeChild(a)}if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s).then(ok,fb);else fb()})})})();`;
 
 const sha = (s: string) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
 export const CSP = `default-src 'none'; style-src ${sha(CSS)}; script-src ${sha(JS)}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 
+export const STAGES: ReadonlyArray<{ id: string; name: string; note: string }> = [
+  { id: 'assess', name: 'Assess', note: 'score + ranked risk' },
+  { id: 'plan', name: 'Plan', note: 'staged upgrade' },
+  { id: 'preview', name: 'Preview', note: 'diff + approval' },
+  { id: 'apply', name: 'Apply', note: 'projected result' },
+  { id: 'verify', name: 'Verify', note: 'runner, needs your own key' },
+  { id: 'report', name: 'Report', note: 'PDF, SARIF, SBOM' }
+];
+
+export const CONNECTORS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'cursor', label: 'Cursor' },
+  { id: 'claude', label: 'Claude' },
+  { id: 'chatgpt', label: 'ChatGPT' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'antigravity', label: 'Antigravity' },
+  { id: 'sse', label: 'Raw / Inspector' }
+];
+
+const NAME = 'metamorph';
+
+// Snippets follow the SDK's own connection page (@nitrostack/core streamable-http.js generateDocumentationPage).
+// None of its snippets has a header field, so the Bearer key is not part of them.
+function snippet(id: string, ep: string): { intro: string; copy: string; code: string } {
+  switch (id) {
+    case 'cursor':
+      return { intro: 'Cursor Settings > Features > MCP > Add New MCP Server:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "url": "${ep}"\n    }\n  }\n}` };
+    case 'antigravity':
+      return { intro: 'Add under mcpServers in ~/.gemini/config/mcp_config.json:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "serverUrl": "${ep}"\n    }\n  }\n}` };
+    case 'codex':
+      return { intro: 'Add to ~/.codex/config.toml:', copy: 'Copy TOML', code: `[mcp_servers.${NAME}]\nurl = "${ep}"` };
+    case 'claude':
+      return { intro: 'In Claude on the web, add a custom connector with these two fields:', copy: 'Copy URL', code: `Name: ${NAME}\nURL: ${ep}` };
+    case 'chatgpt':
+      return { intro: 'In ChatGPT, create a New App with Connection set to Server URL:', copy: 'Copy URL', code: `Name: ${NAME}\nServer URL: ${ep}\nAuthentication: No Auth` };
+    default:
+      return { intro: 'Connect directly with the endpoint:', copy: 'Copy endpoint', code: ep };
+  }
+}
+
 export function renderLanding(endpoint: string): string {
   const e = escapeHtml;
+  const tabs = CONNECTORS.map((c, i) => `<button role="tab" type="button" id="t-${c.id}" aria-controls="p-${c.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}">${e(c.label)}</button>`).join('');
+  const panels = CONNECTORS.map((c, i) => {
+    const s = snippet(c.id, endpoint);
+    return `<div role="tabpanel" id="p-${c.id}" aria-labelledby="t-${c.id}"${i === 0 ? '' : ' hidden'}><p class="lbl">${e(s.intro)}</p><div class="code"><pre id="c-${c.id}">${e(s.code)}</pre><button class="btn sm" type="button" data-copy="c-${c.id}">${e(s.copy)}</button></div></div>`;
+  }).join('');
+  const stages = STAGES.map((s, i) => `<li><a href="/app#${s.id}"><i>${i + 1}</i><b>${e(s.name)}</b><span>${e(s.note)}</span></a></li>`).join('');
   const tools = TOOLS.map((t) => `<tr><td class="n">${e(t.name)}</td><td>${e(t.scope)}</td><td>${e(t.purpose)}</td></tr>`).join('');
-  const res = RESOURCES.map((r) => `<tr><td class="n">${e(r.uri)}</td><td>${e(r.purpose)}</td></tr>`).join('');
-  const ev = EVIDENCE.map((r) => `<tr><td>${e(r.item)}</td><td class="n">${e(r.label)}</td><td>${e(r.note)}</td></tr>`).join('');
+  const res = RESOURCES.map((r) => e(r.uri)).join(' &middot; ');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Metamorph MCP</title>
 <meta name="description" content="Assess, plan and verify legacy PHP and Node upgrades from your AI client.">
 <style>${CSS}</style></head>
-<body><main>
-<header><svg class="logo" viewBox="0 0 64 64" shape-rendering="crispEdges" fill="currentColor" role="img" aria-label="Metamorph logo"><path d="${LOGO_D64}"/></svg>
-<div><h1>Metamorph</h1><p class="lede">Assess, plan and verify legacy PHP and Node upgrades from your AI client.</p></div>
-<div class="top"><a href="/app">Open the dashboard (no key needed)</a> <button id="theme" type="button">Toggle theme</button></div></header>
+<body>
+<header class="bar"><div class="w">
+<a class="brand" href="/"><svg class="logo" viewBox="0 0 64 64" shape-rendering="crispEdges" fill="currentColor" role="img" aria-label="Metamorph logo"><path d="${LOGO_D64}"/></svg>metamorph</a>
+<nav aria-label="Primary"><a href="/app">Dashboard</a><a href="#connect">Connect</a><a href="#tools">Tools</a></nav>
+<div class="right"><button id="theme" class="btn sm" type="button" aria-label="Colour theme: auto, light or dark">Theme: auto</button><a class="btn p" href="/app">Open dashboard &rarr;</a></div>
+</div></header>
+<main>
+<div class="hero"><div class="w">
+<div><h1>Legacy PHP and Node upgrades, assessed, planned and verified from your AI client.</h1>
+<p class="sub">Public GitHub repositories. Nothing in your repository changes.</p>
+<div class="acts"><a class="btn p" href="/app">Open the dashboard (no key needed)</a><a class="btn" href="#connect">Connect an AI agent &darr;</a></div></div>
+<div class="card"><h3>Pick a stage, any time</h3><ol class="stages">${stages}</ol></div>
+</div></div>
 
-<h2>Connect</h2>
-<div class="card"><p class="first">MCP endpoint (Streamable HTTP)</p><pre>${e(endpoint)}</pre>
-<p>Send your key as <code>Authorization: Bearer &lt;key&gt;</code>. Keys carry one of three cumulative scopes: <code>read</code>, <code>plan</code> (includes read), <code>write</code> (includes plan). Ask the server owner for a key.</p></div>
+<section id="connect"><div class="w">
+<p class="eyebrow">Connect an AI agent</p><h2>Add Metamorph to your client</h2>
+<p class="lead">Pick your client and paste the official snippet. The endpoint is Streamable HTTP.</p>
+<div class="panel"><div role="tablist" aria-label="AI client">${tabs}</div>${panels}
+<p class="note">Send your key as <code>Authorization: Bearer &lt;your key&gt;</code> where the client supports a header. The official Claude and ChatGPT connector dialogs have no such field, so a key-protected endpoint cannot be added there.</p>
+<p class="note z">Scopes, cumulative: read &middot; plan &middot; write. Keys are issued by the deployment owner; the dashboard needs none.</p></div>
+</div></section>
 
-<h2>Tools</h2>
-<table><thead><tr><th>Tool</th><th>Scope</th><th>Purpose</th></tr></thead><tbody>${tools}</tbody></table>
+<section><div class="w">
+<p class="eyebrow">What you get</p>
+<div class="grid3">
+<div class="card"><h3>Ranked risk</h3><p class="note z">Exploited first, then severity, then EPSS.</p></div>
+<div class="card"><h3>A plan you can read</h3><p class="note z">Stages, risk and rollback, in plain language.</p></div>
+<div class="card"><h3>Evidence, not vibes</h3><p class="note z">Measured versus projected, always labelled.</p></div>
+</div></div></section>
 
-<h2>Resources</h2>
-<table><thead><tr><th>URI</th><th>Purpose</th></tr></thead><tbody>${res}</tbody></table>
-
-<h2>What is real and what is not</h2>
-<table><thead><tr><th>Item</th><th>Label</th><th>Note</th></tr></thead><tbody>${ev}</tbody></table>
-<p class="note">Nothing here changes your repository. Full list: docs/EVIDENCE.md in the repository.</p>
-
-<footer><a href="${REPO_URL}">GitHub repository</a> &middot; <a href="${README_URL}">README</a></footer>
-</main><script>${JS}</script></body></html>`;
+<section id="tools"><div class="w">
+<p class="eyebrow">Tools</p>
+<table><thead><tr><th>Tool</th><th>Scope</th><th>What it does</th></tr></thead><tbody>${tools}</tbody></table>
+<p class="res"><b>Resources:</b> ${res}</p>
+<p class="res"><b>Prompts:</b> modernize &middot; cve-triage &middot; watch-repo</p>
+</div></section>
+</main>
+<footer><div class="w"><a href="${REPO_URL}">GitHub</a><a href="${README_URL}">README</a><span>v${e(VERSION)}</span></div></footer>
+<script>${JS}</script></body></html>`;
 }
 
 // ---- request handling and route replacement ----

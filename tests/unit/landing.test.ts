@@ -96,7 +96,7 @@ describe('landing page', () => {
   it('makes no external requests', () => {
     const endpoint = 'http://localhost:3001/mcp';
     const html = renderLanding(endpoint);
-    const urls = (html.match(/https?:\/\/[^\s"'<)]+/g) ?? []).filter((u) => u !== endpoint);
+    const urls = (html.match(/https?:\/\/[^\s"'<)]+/g) ?? []).map((u) => u.replace(/&quot;$/, '')).filter((u) => u !== endpoint);
     expect(new Set(urls)).toEqual(new Set([REPO_URL, `${REPO_URL}#readme`]));
     expect(html).not.toMatch(/<(link|img|iframe)\b|@import|url\(/i);
     expect(html).not.toMatch(/\sstyle=|\sonclick=/i); // blocked by the hash-only CSP
@@ -108,6 +108,35 @@ describe('landing page', () => {
       const body = html.split(`<${tag}>`)[1].split(`</${tag}>`)[0];
       expect(CSP).toContain(`'sha256-${createHash('sha256').update(body).digest('base64')}'`);
     }
+  });
+});
+
+describe('landing layout', () => {
+  const html = renderLanding('http://localhost:3001/mcp');
+  it('has no real-vs-not section and the theme switch only in the header', () => {
+    expect(html).not.toMatch(/what is real/i);
+    expect(html.match(/id="theme"/g)).toHaveLength(1);
+    const footer = html.split('<footer>')[1].split('</footer>')[0];
+    expect(footer).not.toMatch(/theme/i);
+    expect(html.indexOf('id="theme"')).toBeLessThan(html.indexOf('</header>'));
+  });
+  it('links six stages into the dashboard', () => {
+    const links = [...html.matchAll(/href="(\/app#[a-z]+)"/g)].map((m) => m[1]);
+    expect(links).toEqual(['/app#assess', '/app#plan', '/app#preview', '/app#apply', '/app#verify', '/app#report']);
+  });
+  it('has six connector tabs, each with the exact endpoint and a copy button', () => {
+    expect(html.match(/role="tab" /g)).toHaveLength(6);
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(6);
+    expect(html.match(/data-copy="/g)).toHaveLength(6);
+    for (const id of ['cursor', 'claude', 'chatgpt', 'codex', 'antigravity', 'sse']) {
+      const pre = html.split(`<pre id="c-${id}">`)[1].split('</pre>')[0];
+      expect(pre).toContain('http://localhost:3001/mcp');
+    }
+    expect(html).toContain('&quot;serverUrl&quot;: &quot;http://localhost:3001/mcp&quot;');
+    expect(html).toContain('url = &quot;http://localhost:3001/mcp&quot;');
+  });
+  it('lists every tool in the table', () => {
+    for (const t of TOOLS) expect(html).toContain(`<td class="n">${t.name}</td>`);
   });
 });
 
