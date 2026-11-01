@@ -6,6 +6,7 @@ Written 2026-11-01 for the owner and for judges. Labels: LIVE (run for real agai
 | Capability | Label | Notes |
 |---|---|---|
 | assess_project, analyze_advisory (OSV, CISA KEV, EPSS, endoflife.date, php.net/Node feeds) | LIVE | Real public data. Rules and the 0-100 score formula are our own, not an industry standard. Built-in EOL tables are an offline fallback. |
+| MCP prompts (`modernize`, `cve-triage`, `watch-repo`) | LIVE | prompts/list and prompts/get answered by the built server over HTTP locally. Text templates only. NOT yet confirmed in NitroStudio. |
 | check_watch (CISA KEV, EPSS, endoflife.date, php.net and Node release feeds) | LIVE | Run locally against the live feeds (Log4Shell KEV hit, PHP 8.1 EOL date). Not yet confirmed by the owner on the deployed server. |
 | plan_modernization, preview_changes | LIVE | Real diffs on real fetched repos. |
 | apply_stage | PROJECTED | Patch is real; the re-score uses a simulated lockfile refresh in our code on a temporary copy. Nothing in the user's repo changes. |
@@ -19,7 +20,7 @@ Written 2026-11-01 for the owner and for judges. Labels: LIVE (run for real agai
 | Automated modernization depth | LIMITED | Only 4 stages change files: dependency bumps, runtime version, committed .env handling, packaging templates. Everything else is guidance only. |
 
 ## Not built
-GitHub branch-PR connector and alerts, Linear, Jira, Slack/Discord/email/n8n notifications, multi-tenant OAuth vault, Azure, IBM Cloud, SonarQube/Snyk pull-mode, one-call `modernize`, MCP prompts, elicitation, PHP-to-Node conversion, private-repository access (public GitHub repos only).
+GitHub branch-PR connector and alerts, Linear, Jira, Slack/Discord/email/n8n notifications, multi-tenant OAuth vault, Azure, IBM Cloud, SonarQube/Snyk pull-mode, one-call `modernize` tool (a `modernize` prompt exists), elicitation, PHP-to-Node conversion, private-repository access (public GitHub repos only).
 
 ## Test-suite evidence
 - Unit tests use fakes: OSV analyzers, fake GitHub (tests/helpers/fake-github.ts), fake feed clients, stubbed AWS SDK calls, hand-built tar/zip archives, fake clocks. They prove logic, not real-world behaviour.

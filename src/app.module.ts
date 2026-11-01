@@ -7,6 +7,7 @@ import { FeedsModule } from './modules/feeds/feeds.module.js';
 import { ReportModule } from './modules/report/report.module.js';
 import { VerifyModule } from './modules/verify/verify.module.js';
 import { CloudModule } from './modules/cloud/cloud.module.js';
+import { PromptsModule } from './modules/prompts/prompts.module.js';
 
 /**
  * Root Application Module
@@ -35,7 +36,8 @@ import { CloudModule } from './modules/cloud/cloud.module.js';
     FeedsModule,
     ReportModule,
     VerifyModule,
-    CloudModule
+    CloudModule,
+    PromptsModule
   ],
   providers: [
     // Health Checks

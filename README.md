@@ -64,8 +64,10 @@ Used
 - Auth and scopes: Bearer key, three cumulative scopes, a guard on every tool.
 - Transport: Streamable HTTP at `/mcp`, health check at `/mcp/health`.
 
+- Prompts: `modernize`, `cve-triage`, `watch-repo` (guided tool sequences; text only, they call nothing themselves). Listed and fetched over MCP locally; not yet confirmed in NitroStudio.
+- Landing page at `GET /` (static, no external requests) replaces the SDK default page.
+
 Not used (not built)
-- MCP prompts.
 - Elicitation (approval is a signed token you pass back, not an in-client prompt).
 
 ## 6. Architecture
@@ -217,7 +219,7 @@ Bad results we also report: scores saturate (two repos score 0, so the scale can
 - Azure, IBM Cloud.
 - SonarQube, Snyk pull-mode.
 - One-call `modernize` tool.
-- MCP prompts and elicitation.
+- Elicitation.
 - PHP-to-Node conversion (out of scope by decision).
 - Private-repository access (public GitHub repos only).
 - Live end-to-end `verify_patch` through the deployed server (the runner itself works; the tool path is fixture-tested).
