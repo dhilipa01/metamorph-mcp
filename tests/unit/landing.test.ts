@@ -127,7 +127,7 @@ describe('landing layout', () => {
   it('has six connector tabs, each with the exact endpoint and a copy button', () => {
     expect(html.match(/role="tab" /g)).toHaveLength(6);
     expect(html.match(/role="tabpanel"/g)).toHaveLength(6);
-    expect(html.match(/data-copy="/g)).toHaveLength(6);
+    expect(html.match(/data-copy="/g)).toHaveLength(7); // six snippets + the minted key
     for (const id of ['cursor', 'claude', 'chatgpt', 'codex', 'antigravity', 'sse']) {
       const pre = html.split(`<pre id="c-${id}">`)[1].split('</pre>')[0];
       expect(pre).toContain('http://localhost:3001/mcp');

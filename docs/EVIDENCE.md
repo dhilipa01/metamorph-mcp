@@ -8,6 +8,7 @@ Written 2026-11-01 for the owner and for judges. Labels: LIVE (run for real agai
 | assess_project, analyze_advisory (OSV, CISA KEV, EPSS, endoflife.date, php.net/Node feeds) | LIVE | Real public data. Rules and the 0-100 score formula are our own, not an industry standard. Built-in EOL tables are an offline fallback. |
 | MCP prompts (`modernize`, `cve-triage`, `watch-repo`) | LIVE | prompts/list and prompts/get answered by the built server over HTTP locally. Text templates only. NOT yet confirmed in NitroStudio. |
 | check_watch (CISA KEV, EPSS, endoflife.date, php.net and Node release feeds) | LIVE | Run locally against the live feeds (Log4Shell KEV hit, PHP 8.1 EOL date). Not yet confirmed by the owner on the deployed server. |
+| Self-service guest keys (`POST /keys/mint`, Get a key button on the landing page) | LIVE | LIVE locally, in-memory per instance (lost on restart or when another instance serves the request). Plan scope, 24 h, 3 per hour per client, 300 active. Not yet confirmed on the deployed server. |
 | Browser host page `GET /app` (real widget in a sandboxed iframe, tools over `/mcp`) | LIVE | Run locally over real HTTP with Playwright (assess, plan, preview, report against the demo repo). NOT yet confirmed on the deployed server. |
 | plan_modernization, preview_changes | LIVE | Real diffs on real fetched repos. |
 | apply_stage | PROJECTED | Patch is real; the re-score uses a simulated lockfile refresh in our code on a temporary copy. Nothing in the user's repo changes. |

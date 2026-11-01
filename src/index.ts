@@ -16,6 +16,7 @@ import { registerReportRoutes, type AppLike } from './modules/report/download.js
 import { installLanding, type LandingApp } from './landing.js';
 import { installAppHost, type AppHostApp } from './app-host.js';
 import { installPublic, type PublicApp } from './public-proxy.js';
+import { installKeyMint, type MintApp } from './key-mint.js';
 import { inlineWidgetCss } from './widget-css.js';
 import { installValidationDeferral } from './common/sdk-validation.js';
 
@@ -38,6 +39,8 @@ async function bootstrap() {
     installLanding(app as unknown as LandingApp, (m) => console.warn(m));
     // Keyless public dashboard: ephemeral in-memory key + allowlisted proxy at POST /app/rpc (METAMORPH_PUBLIC_DASHBOARD=off disables).
     const pub = installPublic(app as unknown as PublicApp, { port: () => Number(process.env.PORT) || 3000 });
+    // Self-service guest keys (plan scope, 24 h, in memory): POST /keys/mint (METAMORPH_KEY_MINT=off disables).
+    installKeyMint(app as unknown as MintApp);
     installAppHost(app as unknown as AppHostApp, { pub });
   }
 }

@@ -93,10 +93,10 @@ footer .w{display:flex;gap:24px;flex-wrap:wrap}
 @media (max-width:560px){.bar .btn.p{display:none}td.n{white-space:normal}}
 `.trim();
 
-const JS = `(function(){var r=document.documentElement,b=document.getElementById('theme'),M=['auto','light','dark'],m='auto';function ap(){if(m==='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',m);if(b)b.textContent='Theme: '+m}try{var t=localStorage.getItem('metamorph-theme');if(t==='light'||t==='dark')m=t}catch(e){}ap();if(b)b.addEventListener('click',function(){m=M[(M.indexOf(m)+1)%3];ap();try{if(m==='auto')localStorage.removeItem('metamorph-theme');else localStorage.setItem('metamorph-theme',m)}catch(e){}});var tabs=[].slice.call(document.querySelectorAll('[role=tab]'));function sel(t,f){tabs.forEach(function(x){var on=x===t;x.setAttribute('aria-selected',on?'true':'false');x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on});if(f)t.focus()}tabs.forEach(function(t,i){t.addEventListener('click',function(){sel(t)});t.addEventListener('keydown',function(e){var k=e.key,n=-1;if(k==='ArrowRight')n=(i+1)%tabs.length;else if(k==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;else if(k==='Home')n=0;else if(k==='End')n=tabs.length-1;if(n>=0){e.preventDefault();sel(tabs[n],true)}})});[].forEach.call(document.querySelectorAll('[data-copy]'),function(c){c.addEventListener('click',function(){var s=document.getElementById(c.getAttribute('data-copy')).textContent;function ok(){var o=c.textContent;c.textContent='Copied';setTimeout(function(){c.textContent=o},1500)}function fb(){var a=document.createElement('textarea');a.value=s;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){}document.body.removeChild(a)}if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s).then(ok,fb);else fb()})})})();`;
+const JS = `(function(){var r=document.documentElement,b=document.getElementById('theme'),M=['auto','light','dark'],m='auto';function ap(){if(m==='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',m);if(b)b.textContent='Theme: '+m}try{var t=localStorage.getItem('metamorph-theme');if(t==='light'||t==='dark')m=t}catch(e){}ap();if(b)b.addEventListener('click',function(){m=M[(M.indexOf(m)+1)%3];ap();try{if(m==='auto')localStorage.removeItem('metamorph-theme');else localStorage.setItem('metamorph-theme',m)}catch(e){}});var tabs=[].slice.call(document.querySelectorAll('[role=tab]'));function sel(t,f){tabs.forEach(function(x){var on=x===t;x.setAttribute('aria-selected',on?'true':'false');x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on});if(f)t.focus()}tabs.forEach(function(t,i){t.addEventListener('click',function(){sel(t)});t.addEventListener('keydown',function(e){var k=e.key,n=-1;if(k==='ArrowRight')n=(i+1)%tabs.length;else if(k==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;else if(k==='Home')n=0;else if(k==='End')n=tabs.length-1;if(n>=0){e.preventDefault();sel(tabs[n],true)}})});[].forEach.call(document.querySelectorAll('[data-copy]'),function(c){c.addEventListener('click',function(){var s=document.getElementById(c.getAttribute('data-copy')).textContent;function ok(){var o=c.textContent;c.textContent='Copied';setTimeout(function(){c.textContent=o},1500)}function fb(){var a=document.createElement('textarea');a.value=s;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){}document.body.removeChild(a)}if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s).then(ok,fb);else fb()})});var mb=document.getElementById('mint'),mk=document.getElementById('mintkey'),mx=document.getElementById('mintbox'),mm=document.getElementById('mintmsg'),orig=[].map.call(document.querySelectorAll('pre[id^=c-]'),function(p){return [p,p.textContent]});function say(t){if(mm)mm.textContent=t}if(mb)mb.addEventListener('click',function(){mb.disabled=true;say('Getting a key...');fetch('/keys/mint',{method:'POST',credentials:'omit',cache:'no-store'}).then(function(r){return r.json().then(function(j){return [r.status,j]},function(){return [r.status,{}]})}).then(function(a){mb.disabled=false;var s=a[0],j=a[1];if(s===200&&j&&typeof j.key==='string'){mk.textContent=j.key;mx.hidden=false;orig.forEach(function(o){o[0].textContent=o[1].split('<your key>').join(j.key)});say('Your key expires '+j.expiresAt+'.')}else if(s===429)say((j&&j.error)||'Too many requests. Please try again later.');else say('Could not get a key right now (error '+s+'). Please try again later.')},function(){mb.disabled=false;say('Could not reach the server. Check your connection and try again.')})})})();`;
 
 const sha = (s: string) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
-export const CSP = `default-src 'none'; style-src ${sha(CSS)}; script-src ${sha(JS)}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+export const CSP = `default-src 'none'; style-src ${sha(CSS)}; script-src ${sha(JS)}; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 
 export const STAGES: ReadonlyArray<{ id: string; name: string; note: string }> = [
   { id: 'assess', name: 'Assess', note: 'score + ranked risk' },
@@ -119,21 +119,22 @@ export const CONNECTORS: ReadonlyArray<{ id: string; label: string }> = [
 const NAME = 'metamorph';
 
 // Snippets follow the SDK's own connection page (@nitrostack/core streamable-http.js generateDocumentationPage).
-// None of its snippets has a header field, so the Bearer key is not part of them.
+// The client-config snippets also carry a Bearer header with the placeholder below; the page script swaps in a minted key (DOM only).
+const KEY = '<your key>';
 function snippet(id: string, ep: string): { intro: string; copy: string; code: string } {
   switch (id) {
     case 'cursor':
-      return { intro: 'Cursor Settings > Features > MCP > Add New MCP Server:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "url": "${ep}"\n    }\n  }\n}` };
+      return { intro: 'Cursor Settings > Features > MCP > Add New MCP Server:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "headers": { "Authorization": "Bearer ${KEY}" },\n      "url": "${ep}"\n    }\n  }\n}` };
     case 'antigravity':
-      return { intro: 'Add under mcpServers in ~/.gemini/config/mcp_config.json:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "serverUrl": "${ep}"\n    }\n  }\n}` };
+      return { intro: 'Add under mcpServers in ~/.gemini/config/mcp_config.json:', copy: 'Copy JSON', code: `{\n  "mcpServers": {\n    // your other mcp servers\n    "${NAME}": {\n      "headers": { "Authorization": "Bearer ${KEY}" },\n      "serverUrl": "${ep}"\n    }\n  }\n}` };
     case 'codex':
-      return { intro: 'Add to ~/.codex/config.toml:', copy: 'Copy TOML', code: `[mcp_servers.${NAME}]\nurl = "${ep}"` };
+      return { intro: 'Add to ~/.codex/config.toml:', copy: 'Copy TOML', code: `[mcp_servers.${NAME}]\nurl = "${ep}"\nhttp_headers = { Authorization = "Bearer ${KEY}" }` };
     case 'claude':
       return { intro: 'In Claude on the web, add a custom connector with these two fields:', copy: 'Copy URL', code: `Name: ${NAME}\nURL: ${ep}` };
     case 'chatgpt':
       return { intro: 'In ChatGPT, create a New App with Connection set to Server URL:', copy: 'Copy URL', code: `Name: ${NAME}\nServer URL: ${ep}\nAuthentication: No Auth` };
     default:
-      return { intro: 'Connect directly with the endpoint:', copy: 'Copy endpoint', code: ep };
+      return { intro: 'Connect directly with the endpoint:', copy: 'Copy endpoint', code: `${ep}\nAuthorization: Bearer ${KEY}` };
   }
 }
 
@@ -170,8 +171,10 @@ export function renderLanding(endpoint: string): string {
 <p class="eyebrow">Connect an AI agent</p><h2>Add Metamorph to your client</h2>
 <p class="lead">Pick your client and paste the official snippet. The endpoint is Streamable HTTP.</p>
 <div class="panel"><div role="tablist" aria-label="AI client">${tabs}</div>${panels}
+<div class="code"><div><button id="mint" class="btn p" type="button">Get a key (plan scope, 24 hours)</button><p id="mintmsg" class="note z" role="status"></p></div></div>
+<div id="mintbox" hidden><p class="lbl">Your key</p><div class="code"><pre id="mintkey"></pre><button class="btn sm" type="button" data-copy="mintkey">Copy</button></div><p class="note">Shown once. Valid 24 hours or until the server restarts. Scope: read and plan (no write).</p></div>
 <p class="note">Send your key as <code>Authorization: Bearer &lt;your key&gt;</code> where the client supports a header. The official Claude and ChatGPT connector dialogs have no such field, so a key-protected endpoint cannot be added there.</p>
-<p class="note z">Scopes, cumulative: read &middot; plan &middot; write. Keys are issued by the deployment owner; the dashboard needs none.</p></div>
+<p class="note z">Scopes, cumulative: read &middot; plan &middot; write. Guest keys (plan scope) are minted here and kept in memory on this instance only; keys with write scope are issued by the deployment owner. The dashboard needs none.</p></div>
 </div></section>
 
 <section><div class="w">

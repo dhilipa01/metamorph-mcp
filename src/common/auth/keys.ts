@@ -8,6 +8,7 @@ export interface KeyEntry {
   label: string;
   scope: Scope;
   hash: Buffer; // sha256 of the key; the plain key is never stored
+  expires?: number; // runtime keys only: epoch ms after which the key is refused and purged
 }
 
 export const sha256 = (value: string): Buffer => createHash('sha256').update(value).digest();
@@ -38,10 +39,17 @@ export function parseKeyTable(env: Record<string, string | undefined>): KeyEntry
 
 // Runtime-only keys (the ephemeral public dashboard key). Held in memory, consulted by the guard next to the env table.
 const runtimeKeys: KeyEntry[] = [];
-export function registerRuntimeKey(label: string, scope: Scope, hash: Buffer): void {
-  runtimeKeys.push({ label: label.toLowerCase(), scope, hash });
+export function registerRuntimeKey(label: string, scope: Scope, hash: Buffer, expires?: number): void {
+  runtimeKeys.push({ label: label.toLowerCase(), scope, hash, expires });
 }
-export const runtimeKeyTable = (): KeyEntry[] => runtimeKeys;
+// Drops expired runtime keys (lazily, on every read) and returns the live ones.
+export function runtimeKeyTable(now: number = Date.now()): KeyEntry[] {
+  for (let i = runtimeKeys.length - 1; i >= 0; i--) {
+    const e = runtimeKeys[i].expires;
+    if (e !== undefined && e <= now) runtimeKeys.splice(i, 1);
+  }
+  return runtimeKeys;
+}
 export function clearRuntimeKeys(): void {
   runtimeKeys.length = 0;
 }

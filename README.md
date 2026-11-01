@@ -31,6 +31,7 @@ Scope today: upgrade, not rewrite. Public GitHub repos only.
 
 1. **Try it with no AI client.** Open `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app`, paste a key (it stays in the tab), run Assess, Plan, Preview and Report.
 2. **Get a key.** Keys are issued by the deployment owner (no public sign-up). `read` runs everything except `plan_modernization` (`plan`) and `apply_stage` / `verify_patch` (`write`). Ask for `plan` at least.
+   **Get your own key:** click Get a key on the landing page (plan scope, 24 h: read and plan, never write). Guest keys are kept in memory on one instance, so they are lost on restart or when another instance serves the request.
 3. **Connect your agent.**
    - URL `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/mcp` (must end in `/mcp`), header `Authorization: Bearer <YOUR_API_KEY>`.
    - NitroStudio: Add Server, Other Project, Connection Type HTTP (Streamable HTTP), paste the URL, Authentication Bearer Token, paste the key.

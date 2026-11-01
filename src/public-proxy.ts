@@ -82,6 +82,13 @@ async function readBody(req: Req): Promise<string | 'too-big'> {
   });
 }
 
+// Hashed (in memory only) client identity for rate limits: first x-forwarded-for hop, else the socket address.
+export function clientIdOf(req: Pick<Req, 'headers' | 'socket'>): string {
+  const xff = req.headers['x-forwarded-for'];
+  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+  return createHash('sha256').update(first || req.socket?.remoteAddress || 'unknown').digest('hex').slice(0, 16);
+}
+
 export function createPublicProxy(opts: PublicOptions = {}) {
   const plainKey = opts.key ?? randomBytes(32).toString('base64url');
   registerRuntimeKey('DASHBOARD', 'write', sha256(plainKey));
@@ -92,11 +99,7 @@ export function createPublicProxy(opts: PublicOptions = {}) {
   let active = 0;
 
   const scrub = (t: string) => (t.includes(plainKey) ? t.split(plainKey).join('[redacted]') : t);
-  const clientId = (req: Req) => {
-    const xff = req.headers['x-forwarded-for'];
-    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
-    return createHash('sha256').update(first || req.socket?.remoteAddress || 'unknown').digest('hex').slice(0, 16);
-  };
+  const clientId = clientIdOf;
 
   async function handle(req: Req, res: Res): Promise<void> {
     const send = (status: number, body: string, extra: Record<string, string> = {}) => {
