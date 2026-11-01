@@ -13,7 +13,7 @@ export interface Actions {
 }
 
 // Miller: show the top 5-7 findings, the rest behind a toggle.
-const VISIBLE = 6;
+const VISIBLE = 5;
 
 const BAND_TEXT = { ok: 'Healthy', warn: 'Needs work', danger: 'At risk' } as const;
 
@@ -100,7 +100,6 @@ function FindingRow({ f, rank, top }: { f: FindingVM; rank: number; top: boolean
         </p>
         <h3 className="fr-title">{f.title}</h3>
         {f.rankReason && <p className="fr-why">Ranked here: {f.rankReason}</p>}
-        {top && f.recommendation && <p className="fr-rec">{f.recommendation}</p>}
       </div>
       <div className="fr-chips">
         {f.kev && <span className="tag tag-kev">Known exploited</span>}
@@ -113,7 +112,6 @@ function FindingRow({ f, rank, top }: { f: FindingVM; rank: number; top: boolean
 export function FindingsList({ vm }: { vm: AssessmentVM }) {
   const [all, setAll] = useState(false);
   const shown = all ? vm.findings : vm.findings.slice(0, VISIBLE);
-  const hidden = vm.findings.length - shown.length;
   const partial = vm.findingCount > vm.findings.length;
   return (
     <section aria-labelledby="mm-find">
@@ -132,12 +130,14 @@ export function FindingsList({ vm }: { vm: AssessmentVM }) {
           ))}
         </ol>
       )}
-      {(hidden > 0 || all) && vm.findings.length > VISIBLE && (
-        <button type="button" className="btn btn-quiet" onClick={() => setAll(!all)} aria-expanded={all}>
-          {all ? `Show the top ${VISIBLE}` : `Show all ${vm.findings.length} listed findings`}
-        </button>
-      )}
-      {partial && <p className="muted small">This result lists the {vm.findings.length} highest ranked of {vm.findingCount}. The report holds the rest.</p>}
+      <div className="more">
+        {vm.findings.length > VISIBLE && (
+          <button type="button" className="btn btn-quiet" onClick={() => setAll(!all)} aria-expanded={all}>
+            {all ? `Show the top ${VISIBLE}` : `Show all ${vm.findings.length} listed findings`}
+          </button>
+        )}
+        {partial && <p className="muted small">The result lists the {vm.findings.length} highest ranked of {vm.findingCount}; the report holds the rest.</p>}
+      </div>
     </section>
   );
 }
@@ -312,7 +312,6 @@ export function AssessmentInline({ vm, actions }: { vm: AssessmentVM; actions: A
       <div className="ci-top">
         <Logo size={24} title="Metamorph" />
         <span className="wordmark">metamorph</span>
-        <EvidenceChip kind={vm.origin} />
       </div>
       <div className="ci-main">
         <ScoreBlock vm={vm} compact />

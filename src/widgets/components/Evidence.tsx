@@ -6,10 +6,10 @@ export type Evidence = 'measured' | 'projected' | 'unverified' | 'reported';
 
 export const EVIDENCE_LABEL: Record<Evidence, string> = { measured: 'Measured', projected: 'Projected', unverified: 'Unverified', reported: 'Reported' };
 export const EVIDENCE_MEANING: Record<Evidence, string> = {
-  measured: 'Computed from the repository files and live advisory data',
-  projected: 'An estimate from our own model; nothing in your repository changed',
-  unverified: 'Not confirmed by a run on an isolated runner',
-  reported: 'Stated by an outside source, not checked here'
+  measured: 'From repository files and live advisories',
+  projected: 'Our estimate; nothing was changed',
+  unverified: 'Not confirmed by a runner',
+  reported: 'Stated by an outside source'
 };
 export const EVIDENCE_ORDER: Evidence[] = ['measured', 'projected', 'unverified', 'reported'];
 

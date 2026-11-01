@@ -71,7 +71,7 @@ def main():
             print(f"{path.name}: page {size[0]}x{size[1]}, {path.stat().st_size // 1024} KB")
             ctx.close()
         # Path 2: no host theme, the user drives the switch itself (auto -> light -> dark). Proves the override path.
-        if not only or "assessment-dark-via-switch-1280x720" in only:
+        if not only or "switch" in only:
             ctx, page = open_page(browser, a.base, "light", "full", 1280, 720, output, inject_theme=False)
             seen = []
             for _ in range(2):
@@ -79,9 +79,10 @@ def main():
                 page.wait_for_timeout(150)
                 seen.append(page.evaluate("document.querySelector('.mm').dataset.theme"))
             assert seen == ["light", "dark"], seen
-            path = out / "assessment-dark-via-switch-1280x720.png"
-            page.screenshot(path=str(path), full_page=True)
-            print(f"{path.name}: switch cycle gave {seen}, {path.stat().st_size // 1024} KB")
+            # Asserted only (no PNG kept, to stay under the image budget): the dark paint comes from the switch itself.
+            bg = page.evaluate("getComputedStyle(document.querySelector('.mm')).backgroundColor")
+            assert bg == "rgb(21, 22, 20)", bg
+            print(f"switch path ok: cycle gave {seen}, background {bg}")
             # A host theme change must not override the choice (host injection is only the initial value here).
             ctx.close()
         browser.close()
