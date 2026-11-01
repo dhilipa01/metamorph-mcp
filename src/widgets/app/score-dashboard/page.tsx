@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
 import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
 import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
+import { ReportView } from '../../components/ReportView';
 import { Shell, ThemeSwitch, useLayout, useTheme, type StepIndex } from '../../components/Shell';
 import { repoLabel, shortSha } from '../../lib/calls';
 import { tokensFor } from '../../lib/theme';
@@ -11,6 +12,8 @@ import { outputFromMessage } from '../../lib/tool-output';
 import { UNRECOGNISED_HEADLINE, describeUnrecognised, scoreBand, toViewModel, unrecognisedDetail, type ViewModel, type ApplyVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
 import '../tokens.css';
 import '../mm.css';
+import '../parts.css';
+import '../report.css';
 import './dashboard.css';
 
 const R = 52;
@@ -130,145 +133,6 @@ function Apply({ vm }: { vm: ApplyVM }) {
         </section>
       )}
       {vm.note && <p className="meta" style={{ marginTop: 12 }}>{vm.note}</p>}
-    </>
-  );
-}
-
-// Blob link for a file the server embedded because it could not issue a clickable link. Revoked on unmount.
-function useBlobUrl(inline: ReportFileVM['inline']): string | undefined {
-  const [url, setUrl] = useState<string>();
-  useEffect(() => {
-    if (!inline) return undefined;
-    let made: string | undefined;
-    try {
-      let part: BlobPart;
-      if (inline.encoding === 'base64') {
-        const bin = atob(inline.data);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        part = bytes;
-      } else part = inline.data;
-      made = URL.createObjectURL(new Blob([part], { type: inline.mimeType }));
-      setUrl(made);
-    } catch {
-      setUrl(undefined);
-    }
-    return () => {
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [inline]);
-  return url;
-}
-
-function DownloadRow({ f, open }: { f: ReportFileVM; open: (url: string) => void }) {
-  const blob = useBlobUrl(f.href ? undefined : f.inline);
-  return (
-    <li className="dl">
-      <div className="dl-info">
-        <h3>{f.label}</h3>
-        <p className="meta mono">
-          {f.fileName} · {f.sizeLabel}
-        </p>
-        {!f.href && !blob && (f.path ?? f.uri) && <p className="meta mono dl-path">{f.path ?? f.uri}</p>}
-      </div>
-      {f.href ? (
-        <a
-          className="btn"
-          href={f.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => {
-            e.preventDefault();
-            open(f.href as string);
-          }}
-        >
-          Download<span className="sr-only"> {f.label}</span>
-        </a>
-      ) : blob ? (
-        <a className="btn" href={blob} download={f.fileName}>
-          Save<span className="sr-only"> {f.label}</span>
-        </a>
-      ) : (
-        <span className="chip neutral">No link</span>
-      )}
-    </li>
-  );
-}
-
-function Report({ vm, open }: { vm: ReportVM; open: (url: string) => void }) {
-  const band = scoreBand(vm.score);
-  const active = vm.counts.filter((c) => c.count > 0);
-  const linked = vm.files.some((f) => f.href);
-  const saved = !linked && vm.files.some((f) => f.inline);
-  return (
-    <>
-      <div className="card top">
-        <ScoreRing score={vm.score} label="Score" />
-        <div>
-          <p className={`band ${band}`}>
-            <span className="chip neutral">{vm.origin[0].toUpperCase() + vm.origin.slice(1)} score</span>
-          </p>
-          <p className="muted">
-            {vm.findingTotal} finding{vm.findingTotal === 1 ? '' : 's'}
-            {vm.pages !== undefined ? ` · ${vm.pages} page${vm.pages === 1 ? '' : 's'}` : ''}
-          </p>
-          <div className="chips">
-            {active.length === 0 ? (
-              <span className="chip low">
-                <SeverityIcon severity="low" />
-                No findings
-              </span>
-            ) : (
-              active.map((c) => (
-                <span key={c.severity} className={`chip ${c.severity}`}>
-                  <SeverityIcon severity={c.severity} />
-                  <span className="num">{c.count}</span> {SEVERITY_LABEL[c.severity]}
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      <section aria-labelledby="sd-dl">
-        <h2 id="sd-dl">Download</h2>
-        {vm.files.length === 0 ? (
-          <div className="card muted">No files in this result. Run generate_report again.</div>
-        ) : (
-          <ul className="card plain dls">
-            {vm.files.map((f) => (
-              <DownloadRow key={f.format} f={f} open={open} />
-            ))}
-          </ul>
-        )}
-        <p className="meta" style={{ marginTop: 8 }}>
-          {linked
-            ? `Links work for ${vm.expiresInMinutes ?? 10} minutes. After that, run generate_report again.`
-            : saved
-              ? 'The server could not issue links, so the files were embedded in this result. If Save does nothing in your client, the host blocks downloads from widgets.'
-              : (vm.message ?? 'This server cannot issue download links. Ask the operator to set METAMORPH_PUBLIC_URL.')}
-        </p>
-      </section>
-
-      <section aria-labelledby="sd-prev">
-        <h2 id="sd-prev">Report preview</h2>
-        <div className="card">
-          {vm.topFindings.length === 0 ? (
-            <p className="muted">No findings: the report confirms a clean result.</p>
-          ) : (
-            <ol className="plain prev">
-              {vm.topFindings.map((t, i) => (
-                <li key={i}>
-                  <SeverityChip severity={t.severity} /> <span>{t.title}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-          <p className="meta" style={{ marginTop: 8 }}>
-            The full PDF has {vm.pages ?? 'several'} pages. Open it to see the rest; a PDF viewer cannot run inside this panel.
-          </p>
-        </div>
-      </section>
     </>
   );
 }
@@ -513,7 +377,7 @@ function Legacy({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
   return (
     <div className="sd">
       <h1>{title}</h1>
-      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'report' ? <Report vm={vm} open={open} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : vm.kind === 'verify' ? <Verify vm={vm} /> : null}
+      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : vm.kind === 'verify' ? <Verify vm={vm} /> : null}
     </div>
   );
 }
@@ -524,6 +388,8 @@ function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | '
       return <EmptyState />;
     case 'unknown':
       return <ErrorState headline={UNRECOGNISED_HEADLINE} detail={unrecognisedDetail(vm)} />;
+    case 'report':
+      return <ReportView vm={vm} actions={actions} />;
     case 'assessment':
       return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
     default:
@@ -566,7 +432,7 @@ export default function ScoreDashboardPage() {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
-  const actions: Actions = { callTool, requestFullscreen };
+  const actions: Actions = { callTool, requestFullscreen, openExternal };
   const a = vm.kind === 'assessment' ? vm : undefined;
   const meta = { repo: repoLabel(a?.repoUrl) ?? (a?.assessmentId ? `assessment ${a.assessmentId.slice(0, 8)}` : undefined), sha: shortSha(a?.commit), time: received || undefined };
   // Only the assessment view has an inline layout so far; the other views always use the full one.

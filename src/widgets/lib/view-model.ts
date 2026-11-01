@@ -12,7 +12,7 @@ export const MAX_REPORT_FILES = 3;
 export const MAX_REPORT_FINDINGS = 3;
 // Largest inline (base64 or text) copy the widget will turn into a Blob link. Matches the server's INLINE_LIMIT_BYTES (the text the model reads contains it too).
 export const MAX_INLINE_BYTES = 24 * 1024;
-export const MAX_CHECKS = 12;
+export const MAX_CHECKS = 25;
 export const MAX_REASONS = 6;
 export const MAX_PROJECTS = 10;
 export const MAX_NOTES = 5;
@@ -144,7 +144,7 @@ export interface ReportVM extends EchoVM {
   kind: 'report';
   reportId: string;
   score: number;
-  origin: string;
+  origin: 'measured' | 'projected' | 'unverified' | 'reported';
   counts: Array<{ severity: Severity; count: number }>;
   findingTotal: number;
   topFindings: Array<{ severity: Severity; title: string }>;
@@ -541,7 +541,7 @@ function toReport(o: Record<string, unknown>, score: Record<string, unknown>): R
     ...echoOf(o),
     reportId: (str(o.reportId) ?? '').slice(0, 24),
     score: pct(score.overall) ?? 0,
-    origin: str(score.origin) ?? 'measured',
+    origin: oneOf(score.origin, ORIGINS, 'measured'),
     counts,
     findingTotal: Math.max(count(f.total), counts.reduce((a, c) => a + c.count, 0)),
     topFindings: top,

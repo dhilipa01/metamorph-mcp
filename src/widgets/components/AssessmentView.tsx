@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { SeverityStrip as Strip, useCopy } from './Parts';
 import { scoreBand, type AssessmentVM, type FindingVM, type Severity } from '../lib/view-model';
 import { nextCallAfterAssessment, type NextCall } from '../lib/calls';
-import { EvidenceChip } from './Evidence';
-import { SEVERITY_LABEL, SEVERITY_ORDER, SeverityIcon } from './Severity';
+import { EvidenceChip, type Evidence } from './Evidence';
+import { SEVERITY_LABEL, SeverityIcon } from './Severity';
 import { Logo } from './Logo';
 import { WingVeins } from './WingVeins';
 
@@ -10,6 +11,7 @@ import { WingVeins } from './WingVeins';
 export interface Actions {
   callTool?: (name: string, args?: Record<string, unknown>) => Promise<unknown>;
   requestFullscreen?: () => Promise<void>;
+  openExternal?: (url: string) => void | Promise<void>;
 }
 
 // Miller: show the top 5-7 findings, the rest behind a toggle.
@@ -17,71 +19,20 @@ const VISIBLE = 5;
 
 const BAND_TEXT = { ok: 'Healthy', warn: 'Needs work', danger: 'At risk' } as const;
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // Sandboxed iframes often block the async clipboard API; fall back to a selection + execCommand.
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.setAttribute('readonly', '');
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(ta);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
-
-function useCopy(text: string) {
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const copy = async () => {
-    setState((await copyText(text)) ? 'copied' : 'failed');
-    setTimeout(() => setState('idle'), 2200);
-  };
-  return { state, copy };
-}
-
-export function ScoreBlock({ vm, compact }: { vm: AssessmentVM; compact?: boolean }) {
-  const band = scoreBand(vm.score);
+export function ScoreBlock({ score, origin, compact, label = 'Modernization score' }: { score: number; origin: Evidence; compact?: boolean; label?: string }) {
+  const band = scoreBand(score);
   return (
-    <section className={`score ${compact ? 'score-compact' : ''}`} aria-label={`Modernization score ${vm.score} out of 100`}>
-      <p className="eyebrow">Modernization score</p>
+    <section className={`score ${compact ? 'score-compact' : ''}`} aria-label={`${label} ${score} out of 100`}>
+      <p className="eyebrow">{label}</p>
       <p className="numeral" aria-hidden="true">
-        {vm.score}
+        {score}
       </p>
       <p className="score-sub">
         <span className="of">out of 100</span>
-        <EvidenceChip kind={vm.origin} />
+        <EvidenceChip kind={origin} />
       </p>
       <p className="band">{BAND_TEXT[band]}</p>
     </section>
-  );
-}
-
-// Five segments, one per severity. Segment fill is the designer ramp; the number and the word carry the meaning.
-export function SeverityStrip({ vm }: { vm: AssessmentVM }) {
-  const by = new Map(vm.counts.map((c) => [c.severity, c.count]));
-  return (
-    <ul className="strip" aria-label="Findings by severity">
-      {SEVERITY_ORDER.map((s) => {
-        const n = by.get(s) ?? 0;
-        return (
-          <li key={s} className={`seg sev-${s} ${n === 0 ? 'seg-zero' : ''}`}>
-            <span className="seg-bar" aria-hidden="true" />
-            <span className="seg-n">{n}</span>
-            <span className="seg-label">{SEVERITY_LABEL[s]}</span>
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 
@@ -279,8 +230,8 @@ export function AssessmentFull({ vm, actions }: { vm: AssessmentVM; actions: Act
   return (
     <div className="grid">
       <div className="col-side">
-        <ScoreBlock vm={vm} />
-        <SeverityStrip vm={vm} />
+        <ScoreBlock score={vm.score} origin={vm.origin} />
+        <Strip counts={vm.counts} />
         <Facts vm={vm} />
         <Projects vm={vm} />
         <Notes vm={vm} />
@@ -314,9 +265,9 @@ export function AssessmentInline({ vm, actions }: { vm: AssessmentVM; actions: A
         <span className="wordmark">metamorph</span>
       </div>
       <div className="ci-main">
-        <ScoreBlock vm={vm} compact />
+        <ScoreBlock score={vm.score} origin={vm.origin} compact />
         <div className="ci-side">
-          <SeverityStrip vm={vm} />
+          <Strip counts={vm.counts} />
           {top && (
             <div className={`ci-top-finding sev-${top.severity}`}>
               <p className="eyebrow">Top finding</p>
