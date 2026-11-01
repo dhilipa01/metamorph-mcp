@@ -5,6 +5,7 @@ import { useWidgetSDK } from '@nitrostack/widgets';
 import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
 import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
 import { ReportView } from '../../components/ReportView';
+import { VerifyView } from '../../components/VerifyView';
 import { Shell, ThemeSwitch, useLayout, useTheme, type StepIndex } from '../../components/Shell';
 import { repoLabel, shortSha } from '../../lib/calls';
 import { tokensFor } from '../../lib/theme';
@@ -14,6 +15,7 @@ import '../tokens.css';
 import '../mm.css';
 import '../parts.css';
 import '../report.css';
+import '../verify.css';
 import './dashboard.css';
 
 const R = 52;
@@ -133,88 +135,6 @@ function Apply({ vm }: { vm: ApplyVM }) {
         </section>
       )}
       {vm.note && <p className="meta" style={{ marginTop: 12 }}>{vm.note}</p>}
-    </>
-  );
-}
-
-const RUN_LABEL: Record<string, string> = { queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed', timed_out: 'Timed out' };
-
-function RunLine({ label, r }: { label: string; r: RunVM }) {
-  const t = r.tests;
-  return (
-    <div className="fact">
-      <dt>{label}</dt>
-      <dd>
-        {RUN_LABEL[r.status]}
-        {r.buildOk !== undefined && <> · build {r.buildOk ? 'ok' : 'not ok'}</>}
-        {t && <> · tests {t.ran === 0 ? 'none found' : `${t.passed}/${t.ran} passed`}</>}
-      </dd>
-    </div>
-  );
-}
-
-function Verify({ vm }: { vm: VerifyVM }) {
-  return (
-    <>
-      <div className="card">
-        <div className="chips" style={{ marginTop: 0 }}>
-          <span className={`chip ${vm.status === 'completed' ? 'neutral' : vm.status === 'running' || vm.status === 'queued' ? 'guided' : 'high'}`}>{RUN_LABEL[vm.status]}</span>
-          <span className={`chip ${vm.verified ? 'low' : 'high'}`}>{vm.verified ? 'Verified' : 'Not verified'}</span>
-        </div>
-        {vm.stage && <p className="meta" style={{ marginTop: 8 }}>Stage: {vm.stage}</p>}
-        <p className="meta" style={{ marginTop: 8 }}>Measured on an isolated runner, not projected.</p>
-      </div>
-      {!vm.verified && vm.reasons.length > 0 && (
-        <section aria-labelledby="sd-why">
-          <h2 id="sd-why">Why not verified ({vm.reasonCount})</h2>
-          <ul className="card plain">
-            {vm.reasons.map((r, i) => (
-              <li key={`${r}-${i}`}>{r}</li>
-            ))}
-          </ul>
-          {vm.reasonCount > vm.reasons.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.reasons.length} of {vm.reasonCount}.</p>}
-        </section>
-      )}
-      <section className="card" aria-labelledby="sd-runs">
-        <h2 id="sd-runs">Before and after</h2>
-        <dl className="facts">
-          <RunLine label="Baseline (before)" r={vm.baseline} />
-          <RunLine label="Patched (after)" r={vm.patched} />
-        </dl>
-      </section>
-      {vm.measured && (
-        <section className="card" aria-labelledby="sd-measured">
-          <h2 id="sd-measured">Measured score (runner tools)</h2>
-          <dl className="facts">
-            <div className="fact">
-              <dt>Baseline (before)</dt>
-              <dd>{vm.measured.baseline} · {vm.measured.baselineFindings} distinct findings</dd>
-            </div>
-            <div className="fact">
-              <dt>Patched (after)</dt>
-              <dd>{vm.measured.patched} · {vm.measured.patchedFindings} distinct findings</dd>
-            </div>
-          </dl>
-          <p className="meta" style={{ marginTop: 8 }}>
-            {vm.measured.note ?? 'The measured score covers only what the runner tools reported; it is not the static assessment score.'}
-            {!vm.verified && ' A measured score does not mean the patch is verified.'}
-          </p>
-        </section>
-      )}
-      {vm.checks.length > 0 && (
-        <section aria-labelledby="sd-checks">
-          <h2 id="sd-checks">Checks ({vm.checkCount})</h2>
-          <ul className="card plain">
-            {vm.checks.map((c, i) => (
-              <li key={`${c.tool}-${i}`}>
-                <span className={`chip ${c.status === 'pass' ? 'low' : c.status === 'skipped' ? 'neutral' : 'high'}`}>{c.status}</span> <span className="mono">{c.tool}</span>
-              </li>
-            ))}
-          </ul>
-          {vm.checkCount > vm.checks.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.checks.length} of {vm.checkCount}.</p>}
-        </section>
-      )}
-      {vm.hint && <p className="meta" style={{ marginTop: 12 }}>{vm.hint}</p>}
     </>
   );
 }
@@ -377,7 +297,7 @@ function Legacy({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
   return (
     <div className="sd">
       <h1>{title}</h1>
-      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : vm.kind === 'verify' ? <Verify vm={vm} /> : null}
+      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : null}
     </div>
   );
 }
@@ -390,6 +310,8 @@ function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | '
       return <ErrorState headline={UNRECOGNISED_HEADLINE} detail={unrecognisedDetail(vm)} />;
     case 'report':
       return <ReportView vm={vm} actions={actions} />;
+    case 'verify':
+      return <VerifyView vm={vm} actions={actions} />;
     case 'assessment':
       return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
     default:
