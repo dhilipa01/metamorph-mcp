@@ -65,7 +65,7 @@
 .mm .seg { display: flex; flex-direction: column; gap: var(--s-1); }
 .mm .seg-bar { height: 0.7rem; background: var(--sev); }
 .mm .seg-zero .seg-bar { background: transparent; box-shadow: inset 0 0 0 1px var(--rule-strong); }
-.mm .seg-n { font-size: var(--step-4); line-height: 1; font-weight: 300; }
+.mm .seg-n { font-size: var(--step-2); line-height: 1.1; font-weight: 400; }
 .mm .seg-zero .seg-n { color: var(--muted); }
 .mm .seg-label { font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .mm .sev-critical { --sev: var(--sev-critical); }
@@ -123,8 +123,14 @@
 .mm .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
 
 /* ---------- next step ---------- */
-.mm .next { background: var(--panel); padding: var(--s-4) var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); border-top: 2px solid var(--text); }
-.mm .next-title { font-family: var(--font-serif); font-weight: 400; font-size: var(--step-2); line-height: var(--lh-tight); }
+.mm .next { background: var(--panel); padding: var(--s-3) var(--s-4); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; column-gap: var(--s-5); row-gap: 0; border-top: 2px solid var(--text); position: sticky; bottom: var(--s-2); z-index: 3; box-shadow: 0 0 0 1px var(--rule-strong); }
+.mm .next > .eyebrow { grid-column: 1; grid-row: 1; }
+.mm .next > .next-title { grid-column: 1; grid-row: 2; font-family: var(--font-serif); font-weight: 400; font-size: var(--step-1); line-height: var(--lh-tight); }
+.mm .next > .call { grid-column: 2; grid-row: 1 / span 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--step--1); }
+.mm .next > .actions { grid-column: 3; grid-row: 1 / span 2; flex-wrap: nowrap; }
+.mm .next > .small { grid-column: 1 / -1; }
+.mm .next .btn { min-height: 2.75rem; padding: 0 var(--s-5); font-size: var(--step-0); }
+@media (max-width: 900px) { .mm .next { grid-template-columns: minmax(0, 1fr); } .mm .next > * { grid-column: 1 !important; grid-row: auto !important; } .mm .next > .call { white-space: pre-wrap; } }
 .mm .call { background: var(--base); padding: var(--s-3) var(--s-4); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--step-0); border-left: 2px solid var(--rule-strong); }
 .mm .status { color: var(--muted); }
 .mm .status:empty { display: none; }
@@ -166,3 +172,7 @@
 .mm .inline-tools { position: absolute; top: var(--s-5); right: var(--s-5); z-index: 2; }
 .mm-inline .frame-inline { position: relative; }
 .mm .inline-tools .tswitch { min-height: 2rem; }
+
+/* dark: a softer marker on the forest panel (the full crimson bar vibrated) */
+.mm[data-theme="dark"] .is-top { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, var(--panel)); }
+.mm[data-theme="dark"] .ci-top-finding { border-left-color: color-mix(in srgb, var(--accent) 55%, var(--panel)); }
