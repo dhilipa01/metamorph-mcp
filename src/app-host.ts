@@ -232,7 +232,7 @@ function mount(){
   return init().then(function(){return rpc('resources/read',{uri:WIDGET})}).then(function(r){
     var c=r&&r.contents&&r.contents[0];var h=c&&typeof c.text==='string'?c.text:'';
     if(!h)throw new Error('The server returned no widget HTML.');
-    var ce=$('wcss'),tag='<style>'+(ce?ce.textContent:'')+'.mm .tswitch,.mm .inline-tools{display:none}</style><script>'+SHIM+'<\\/script>';
+    var ce=$('wcss'),tag='<style>'+(ce?ce.textContent:'')+'.mm .tswitch,.mm .inline-tools{display:none!important}</style><script>'+SHIM+'<\\/script>';
     frame=document.createElement('iframe');
     frame.setAttribute('sandbox','allow-scripts');
     frame.setAttribute('title','Metamorph score dashboard');

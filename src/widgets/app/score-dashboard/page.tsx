@@ -82,7 +82,7 @@ function stepOf(vm: ViewModel): StepIndex | null {
     case 'plan':
       return 1;
     case 'apply':
-      return 2;
+      return 3;
     case 'verify':
       return 3;
     case 'report':
