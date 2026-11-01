@@ -1,55 +1,25 @@
 /* Score dashboard. Colours come from the tokens below only (docs/DESIGN.md). */
-:root {
-  --bg: #ffffff;
-  --surface: #f5f6f8;
-  --border: #e1e4ea;
-  --text: #12151b;
-  --text-muted: #566070;
-  --primary: #4f46e5;
-  --ok: #15803d;
-  --warn: #b45309;
-  --danger: #b91c1c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #0d0f12;
-    --surface: #151922;
-    --border: #262c38;
-    --text: #eceff4;
-    --text-muted: #9aa4b5;
-    --primary: #8b83ff;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --danger: #f87171;
-  }
-}
-
-:root[data-theme='dark'] {
-  --bg: #0d0f12;
-  --surface: #151922;
-  --border: #262c38;
-  --text: #eceff4;
-  --text-muted: #9aa4b5;
-  --primary: #8b83ff;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --danger: #f87171;
-}
-
-body {
-  background: var(--bg);
-  color: var(--text);
+/* Legacy views (plan, apply, verify, report) still use these names; they now resolve to the design tokens in
+   app/tokens.css, so both themes work. A full redesign of these views comes in a later stage. */
+.mm .sd {
+  --bg: var(--base);
+  --surface: var(--panel);
+  --border: var(--rule);
+  --text-muted: var(--muted);
+  --primary: var(--accent);
+  --ok: var(--state-verified);
+  --warn: var(--sev-high);
+  --danger: var(--sev-critical);
 }
 
 .sd {
-  --radius: 8px;
+  --radius: 2px;
   --touch: 44px;
   box-sizing: border-box;
   max-width: 960px;
   margin: 0 auto;
   padding: 16px;
-  font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
   color: var(--text);
@@ -74,7 +44,7 @@ body {
   margin: 0;
 }
 .sd .mono {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .sd .num {

@@ -41,3 +41,16 @@ export const DARK: Record<string, string> = {
 };
 
 export const tokensFor = (t: ThemeName): Record<string, string> => (t === 'dark' ? DARK : LIGHT);
+
+// The user's choice for this widget. 'auto' means: follow the host.
+export type ThemePref = 'auto' | 'light' | 'dark';
+
+// One rule for the theme to paint: the user's explicit choice, else the host's theme, else the system preference,
+// else null (the CSS then decides through prefers-color-scheme). A host change is followed only while pref is 'auto'.
+export function resolveTheme(o: { host?: string | null; pref?: ThemePref | null; system?: ThemeName | null }): ThemeName | null {
+  if (o.pref === 'light' || o.pref === 'dark') return o.pref;
+  if (o.host === 'light' || o.host === 'dark') return o.host;
+  return o.system ?? null;
+}
+
+export const nextPref = (p: ThemePref): ThemePref => (p === 'auto' ? 'light' : p === 'light' ? 'dark' : 'auto');

@@ -14,6 +14,9 @@ export const MAX_REPORT_FINDINGS = 3;
 export const MAX_INLINE_BYTES = 24 * 1024;
 export const MAX_CHECKS = 12;
 export const MAX_REASONS = 6;
+export const MAX_PROJECTS = 10;
+export const MAX_NOTES = 5;
+const ORIGINS = ['measured', 'projected', 'unverified', 'reported'] as const;
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Risk = 'low' | 'medium' | 'high';
@@ -26,6 +29,11 @@ export interface FindingVM {
   evidence?: string;
   recommendation?: string;
   rankReason?: string;
+  // Known exploited (CISA KEV) and EPSS probability 0..1, only when the result carries them.
+  kev?: boolean;
+  epss?: number;
+  // Folder of the project in a monorepo, when the result says so.
+  project?: string;
 }
 
 export interface StageVM {
@@ -60,6 +68,19 @@ export interface AssessmentVM {
   runtime: { declared?: string; source?: string };
   hosting: string[];
   truncated: boolean;
+  // Evidence label of the score (docs/EVIDENCE.md): a static assessment is computed from the repository files and live
+  // advisory data, so it is 'measured' unless the result says otherwise.
+  origin: 'measured' | 'projected' | 'unverified' | 'reported';
+  assessmentId?: string;
+  // Only when the result carries them (assess_project does not echo its input today): used for the header and for
+  // composing the next call.
+  repoUrl?: string;
+  subfolder?: string;
+  commit?: string;
+  generatedAt?: string;
+  projects: Array<{ path: string; stack: string; assessed: boolean }>;
+  notes: string[];
+  dependencyTotal?: number;
 }
 
 export interface PlanVM {
@@ -205,7 +226,10 @@ function finding(raw: unknown): FindingVM | undefined {
     title,
     evidence: str(raw.evidence),
     recommendation: str(raw.recommendation),
-    rankReason: str(raw.rankReason)
+    rankReason: str(raw.rankReason),
+    ...(raw.kev === true ? { kev: true } : {}),
+    ...(num(raw.epss) !== undefined && num(raw.epss)! >= 0 && num(raw.epss)! <= 1 ? { epss: num(raw.epss) } : {}),
+    ...(str(raw.project) ? { project: str(raw.project) } : {})
   };
 }
 
@@ -350,7 +374,20 @@ function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>
       : undefined,
     runtime: { declared: str(runtime.declared), source: str(runtime.source) },
     hosting: strList(o.hosting, 10),
-    truncated: o.truncated === true
+    truncated: o.truncated === true,
+    origin: oneOf(isObj(o.score) ? o.score.origin : undefined, ORIGINS, 'measured'),
+    assessmentId: str(o.assessmentId),
+    repoUrl: str(o.repo_url) ?? str(o.repoUrl),
+    subfolder: str(o.subfolder),
+    commit: str(o.commit) ?? str(o.sha),
+    generatedAt: str(o.generatedAt),
+    projects: list(o.projects, MAX_PROJECTS, (p) => {
+      if (!isObj(p)) return undefined;
+      const path = str(p.path);
+      return path ? { path, stack: str(p.stack) ?? 'unknown', assessed: p.assessed !== false } : undefined;
+    }),
+    notes: strList(o.notes, MAX_NOTES),
+    dependencyTotal: deps && num(deps.total) !== undefined ? count(deps.total) : undefined
   };
 }
 

@@ -2,54 +2,19 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useWidgetSDK } from '@nitrostack/widgets';
+import { AssessmentFull, AssessmentInline, EmptyState, ErrorState, LoadingState, type Actions } from '../../components/AssessmentView';
+import { SEVERITY_LABEL, SeverityIcon } from '../../components/Severity';
+import { Shell, ThemeSwitch, useLayout, useTheme, type StepIndex } from '../../components/Shell';
+import { repoLabel, shortSha } from '../../lib/calls';
+import { tokensFor } from '../../lib/theme';
 import { outputFromMessage } from '../../lib/tool-output';
-import { UNRECOGNISED_HEADLINE, describeUnrecognised, scoreBand, toViewModel, unrecognisedDetail, type UnknownVM, type ViewModel, type ApplyVM, type AssessmentVM, type FindingVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
+import { UNRECOGNISED_HEADLINE, describeUnrecognised, scoreBand, toViewModel, unrecognisedDetail, type ViewModel, type ApplyVM, type PlanVM, type ReportFileVM, type ReportVM, type Severity, type StageVM, type VerifyVM, type RunVM } from '../../lib/view-model';
+import '../tokens.css';
+import '../mm.css';
 import './dashboard.css';
 
 const R = 52;
 const CIRC = 2 * Math.PI * R;
-
-const SEVERITY_LABEL: Record<Severity, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
-
-function SeverityIcon({ severity }: { severity: Severity }) {
-  // A different shape per level, so severity is readable without colour.
-  const common = { viewBox: '0 0 12 12', 'aria-hidden': true, focusable: false } as const;
-  switch (severity) {
-    case 'critical':
-      return (
-        <svg {...common}>
-          <path d="M4 1h4l3 3v4l-3 3H4L1 8V4z" fill="currentColor" />
-          <path d="M4 4l4 4M8 4L4 8" className="cut" />
-        </svg>
-      );
-    case 'high':
-      return (
-        <svg {...common}>
-          <path d="M6 1l5.5 10h-11z" fill="currentColor" />
-          <path d="M6 4.5v3M6 9v.5" className="cut" />
-        </svg>
-      );
-    case 'medium':
-      return (
-        <svg {...common}>
-          <path d="M6 1l5 5-5 5-5-5z" fill="currentColor" />
-        </svg>
-      );
-    case 'low':
-      return (
-        <svg {...common}>
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        </svg>
-      );
-    default:
-      return (
-        <svg {...common}>
-          <circle cx="6" cy="6" r="5" fill="currentColor" />
-          <path d="M6 5.5v3M6 3.5v.5" className="cut" />
-        </svg>
-      );
-  }
-}
 
 function SeverityChip({ severity }: { severity: Severity }) {
   return (
@@ -82,134 +47,6 @@ function Bar({ value }: { value: number }) {
     <span className="bar-track" aria-hidden="true">
       <span className={`bar-fill ${scoreBand(value)}`} style={{ width: `${value}%` }} />
     </span>
-  );
-}
-
-function FindingItem({ f }: { f: FindingVM }) {
-  return (
-    <li className="finding">
-      <div className="chips" style={{ marginTop: 0 }}>
-        <SeverityChip severity={f.severity} />
-        <span className="chip neutral cap">{f.category}</span>
-      </div>
-      <h3>{f.title}</h3>
-      {f.evidence && <p className="evidence mono">{f.evidence}</p>}
-      {f.recommendation && (
-        <details>
-          <summary>Recommendation</summary>
-          <div className="detail-body">{f.recommendation}</div>
-        </details>
-      )}
-    </li>
-  );
-}
-
-function Assessment({ vm }: { vm: AssessmentVM }) {
-  const band = scoreBand(vm.score);
-  const bandText = band === 'ok' ? 'Healthy' : band === 'warn' ? 'Needs work' : 'At risk';
-  const bandIcon: Severity = band === 'ok' ? 'low' : band === 'warn' ? 'medium' : 'high';
-  const active = vm.counts.filter((c) => c.count > 0);
-  const d = vm.dependencies;
-  return (
-    <>
-      <div className="card top">
-        <ScoreRing score={vm.score} label="Score" />
-        <div>
-          <p className={`band ${band}`}>
-            <span className="sr-only">Status: </span>
-            {bandText}
-          </p>
-          <p className="muted">
-            Stack: <span className="mono">{vm.stack}</span> · {vm.findingCount} finding{vm.findingCount === 1 ? '' : 's'}
-          </p>
-          <div className="chips">
-            {active.length === 0 ? (
-              <span className="chip low">
-                <SeverityIcon severity={bandIcon} />
-                No findings
-              </span>
-            ) : (
-              active.map((c) => (
-                <span key={c.severity} className={`chip ${c.severity}`}>
-                  <SeverityIcon severity={c.severity} />
-                  <span className="num">{c.count}</span> {SEVERITY_LABEL[c.severity]}
-                </span>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {vm.byCategory.length > 0 && (
-        <section className="card" aria-labelledby="sd-cat">
-          <h2 id="sd-cat">Score by category</h2>
-          <ul className="bars">
-            {vm.byCategory.map((c) => (
-              <li key={c.category} className="bar-row" aria-label={`${c.category} ${c.score} out of 100`}>
-                <span className="cap">{c.category}</span>
-                <Bar value={c.score} />
-                <span className="bar-score num">{c.score}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section aria-labelledby="sd-find">
-        <h2 id="sd-find">Top findings</h2>
-        {vm.findings.length === 0 ? (
-          <div className="card muted">No findings to show.</div>
-        ) : (
-          <ul className="list">
-            {vm.findings.map((f, i) => (
-              <FindingItem key={`${f.id}-${i}`} f={f} />
-            ))}
-          </ul>
-        )}
-        {vm.findingCount > vm.findings.length && <p className="meta" style={{ marginTop: 8 }}>Showing {vm.findings.length} of {vm.findingCount} findings.</p>}
-      </section>
-
-      <div className="grid2">
-        {d && (
-          <section className="card" aria-labelledby="sd-dep">
-            <h2 id="sd-dep">Dependencies</h2>
-            <dl className="facts">
-              <div className="fact">
-                <dt>Checked</dt>
-                <dd className="num">{d.checked}</dd>
-              </div>
-              <div className="fact">
-                <dt>Vulnerable</dt>
-                <dd className={`num ${d.vulnerable > 0 ? 'danger' : ''}`}>{d.vulnerable}</dd>
-              </div>
-              <div className="fact">
-                <dt>Urgent</dt>
-                <dd className={`num ${d.urgent > 0 ? 'danger' : ''}`}>{d.urgent}</dd>
-              </div>
-            </dl>
-            {d.approximateVersions && <p className="meta" style={{ marginTop: 8 }}>Some versions are approximate (no lockfile).</p>}
-          </section>
-        )}
-        <section className="card" aria-labelledby="sd-rt">
-          <h2 id="sd-rt">Runtime and hosting</h2>
-          <dl className="facts">
-            <div className="fact">
-              <dt>Runtime</dt>
-              <dd className="mono">{vm.runtime.declared ?? 'not declared'}</dd>
-            </div>
-            <div className="fact">
-              <dt>Declared in</dt>
-              <dd className="mono">{vm.runtime.source ?? 'n/a'}</dd>
-            </div>
-            <div className="fact">
-              <dt>Hosting</dt>
-              <dd>{vm.hosting.length ? vm.hosting.join(', ') : 'none detected'}</dd>
-            </div>
-          </dl>
-        </section>
-      </div>
-      {vm.truncated && <p className="meta" style={{ marginTop: 8 }}>Large repository: only part of it was scanned.</p>}
-    </>
   );
 }
 
@@ -603,15 +440,6 @@ function Plan({ vm }: { vm: PlanVM }) {
   );
 }
 
-function Unrecognised({ vm, renderError }: { vm: UnknownVM; renderError?: string }) {
-  return (
-    <div className="card state" role="alert">
-      <p>{UNRECOGNISED_HEADLINE}</p>
-      <p className="muted mono">{unrecognisedDetail(vm, renderError)}</p>
-    </div>
-  );
-}
-
 // A render error must be visible, never a blank or a fallback to the empty state.
 class ResultBoundary extends React.Component<{ raw: unknown; children: React.ReactNode }, { error?: string }> {
   state: { error?: string } = {};
@@ -622,7 +450,10 @@ class ResultBoundary extends React.Component<{ raw: unknown; children: React.Rea
     if (prev.raw !== this.props.raw && this.state.error) this.setState({ error: undefined });
   }
   render() {
-    if (this.state.error) return <Unrecognised vm={describeUnrecognised(this.props.raw)} renderError={this.state.error} />;
+    if (this.state.error) {
+      const vm = describeUnrecognised(this.props.raw);
+      return <ErrorState headline={UNRECOGNISED_HEADLINE} detail={unrecognisedDetail(vm, this.state.error)} />;
+    }
     return this.props.children;
   }
 }
@@ -661,43 +492,73 @@ function useToolOutput(): unknown {
   return output;
 }
 
-function Body({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
+// Which step of the journey (Assess > Plan > Preview > Apply/Verify > Report) a result belongs to.
+function stepOf(vm: ViewModel): StepIndex {
   switch (vm.kind) {
-    case 'empty':
-      return (
-        <div className="card state" role="status">
-          <p>No results yet.</p>
-          <p className="muted">Run assess_project, plan_modernization, apply_stage or generate_report to see results.</p>
-        </div>
-      );
-    case 'unknown':
-      return <Unrecognised vm={vm} />;
     case 'plan':
-      return <Plan vm={vm} />;
-    case 'report':
-      return <Report vm={vm} open={open} />;
+      return 1;
     case 'apply':
-      return <Apply vm={vm} />;
+      return 2;
     case 'verify':
-      return <Verify vm={vm} />;
+      return 3;
+    case 'report':
+      return 4;
     default:
-      return <Assessment vm={vm} />;
+      return 0;
   }
 }
 
-export default function ScoreDashboardPage() {
-  const { isReady, theme, openExternal } = useWidgetSDK();
-  const raw = useToolOutput();
+function Legacy({ vm, open }: { vm: ViewModel; open: (url: string) => void }) {
+  const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'verify' ? 'Verification' : vm.kind === 'plan' ? 'Modernization plan' : 'Projected result';
+  return (
+    <div className="sd">
+      <h1>{title}</h1>
+      {vm.kind === 'plan' ? <Plan vm={vm} /> : vm.kind === 'report' ? <Report vm={vm} open={open} /> : vm.kind === 'apply' ? <Apply vm={vm} /> : vm.kind === 'verify' ? <Verify vm={vm} /> : null}
+    </div>
+  );
+}
 
-  // Honour the host theme; without one the CSS falls back to prefers-color-scheme.
+function Body({ vm, layout, actions, open }: { vm: ViewModel; layout: 'full' | 'inline'; actions: Actions; open: (url: string) => void }) {
+  switch (vm.kind) {
+    case 'empty':
+      return <EmptyState />;
+    case 'unknown':
+      return <ErrorState headline={UNRECOGNISED_HEADLINE} detail={unrecognisedDetail(vm)} />;
+    case 'assessment':
+      return layout === 'inline' ? <AssessmentInline vm={vm} actions={actions} /> : <AssessmentFull vm={vm} actions={actions} />;
+    default:
+      return <Legacy vm={vm} open={open} />;
+  }
+}
+
+const timeOf = (iso: string | undefined): string => {
+  const d = iso ? new Date(iso) : new Date();
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+export default function ScoreDashboardPage() {
+  const { isReady, theme: hostTheme, displayMode, openExternal, callTool, requestFullscreen } = useWidgetSDK();
+  const raw = useToolOutput();
+  const { theme, pref, cycle } = useTheme(hostTheme);
+  const layout = useLayout(displayMode);
+
+  // The page background outside the root element follows the theme too (inline mode can be shorter than the frame).
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
-    else root.removeAttribute('data-theme');
+    if (!theme) return;
+    const t = tokensFor(theme);
+    document.documentElement.style.background = t['--base'];
+    document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
   const vm = useMemo(() => toViewModel(raw), [raw]);
-  const loading = !isReady && raw === null;
+  // First render equals the server HTML (a skeleton); the real state follows after mount, so hydration never mismatches.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const loading = !mounted || (!isReady && raw === null);
+  const [received, setReceived] = useState('');
+  useEffect(() => {
+    if (raw !== null) setReceived(timeOf(vm.kind === 'assessment' ? vm.generatedAt : undefined));
+  }, [raw, vm]);
   const open = (url: string) => {
     try {
       openExternal(url);
@@ -705,23 +566,23 @@ export default function ScoreDashboardPage() {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
-  const title = vm.kind === 'report' ? 'Assessment report' : vm.kind === 'verify' ? 'Verification' : vm.kind === 'plan' ? 'Modernization plan' : vm.kind === 'apply' ? 'Projected result' : 'Modernization score';
+  const actions: Actions = { callTool, requestFullscreen };
+  const a = vm.kind === 'assessment' ? vm : undefined;
+  const meta = { repo: repoLabel(a?.repoUrl) ?? (a?.assessmentId ? `assessment ${a.assessmentId.slice(0, 8)}` : undefined), sha: shortSha(a?.commit), time: received || undefined };
+  // Only the assessment view has an inline layout so far; the other views always use the full one.
+  const shellLayout = vm.kind === 'assessment' || loading ? layout : 'full';
 
   return (
-    <main className="sd" aria-busy={loading}>
-      <h1>{title}</h1>
-      {loading ? (
-        <div className="card" role="status" aria-live="polite">
-          <span className="sr-only">Loading results</span>
-          <div className="skeleton w60" />
-          <div className="skeleton w90" />
-          <div className="skeleton w60" />
-        </div>
-      ) : (
-        <ResultBoundary raw={raw}>
-          <Body vm={vm} open={open} />
-        </ResultBoundary>
-      )}
-    </main>
+    <Shell theme={theme} layout={shellLayout} step={stepOf(vm)} meta={meta} sw={<ThemeSwitch pref={pref} onCycle={cycle} theme={theme} />}>
+      <div aria-busy={loading}>
+        {loading ? (
+          <LoadingState />
+        ) : (
+          <ResultBoundary raw={raw}>
+            <Body vm={vm} layout={layout} actions={actions} open={open} />
+          </ResultBoundary>
+        )}
+      </div>
+    </Shell>
   );
 }
