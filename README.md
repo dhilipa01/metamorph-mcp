@@ -201,4 +201,4 @@ Bad results we also report: scores saturate (two repos score 0, so the scale can
 
 ---
 
-No LICENSE file in this repository yet.
+MIT License. Copyright (c) 2026 Dhilipan Sankar. See `LICENSE`.

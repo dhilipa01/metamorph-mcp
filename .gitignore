@@ -72,3 +72,10 @@ tokens.json
 .cursor/
 .gemini/
 .opencode/
+
+# Local notes and planning files (not part of the project)
+.notes/
+
+# Python bytecode
+__pycache__/
+*.pyc

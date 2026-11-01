@@ -1,6 +1,6 @@
 # Architecture
 
-One page. What is real and what is not: `docs/EVIDENCE.md`. Tools, scopes and setup: `README.md`. Threats: `docs/THREAT_MODEL.md`. Other files in `docs/` (PRD, TRD, PLAN_V2, APP_FLOW, DESIGN) are earlier design notes and describe more than is built; where they disagree with the code or with `docs/EVIDENCE.md`, the code and EVIDENCE win.
+One page. What is real and what is not: `docs/EVIDENCE.md`. Tools, scopes and setup: `README.md`. Threats: `docs/THREAT_MODEL.md`.
 
 ## Module map (`src/modules`, NitroStack TypeScript SDK)
 | Module | Tools / resources | Role |
