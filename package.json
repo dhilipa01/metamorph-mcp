@@ -24,7 +24,7 @@
     "@aws-sdk/client-lambda": "3.1161.0",
     "@aws-sdk/client-rds": "3.1161.0",
     "@aws-sdk/client-sts": "3.1161.0",
-    "@modelcontextprotocol/ext-apps": "^1.0.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@nitrostack/core": "^1.1.2",
     "dotenv": "^16.3.1",
     "pdfmake": "0.3.13",
