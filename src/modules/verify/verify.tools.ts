@@ -3,6 +3,7 @@ import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { DISPATCHES_RUNS } from '../../common/tool-annotations.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
+import { echoOf } from '../assessment/echo.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
 import { GithubRunner, loadRunnerConfig } from './github-runner.js';
@@ -63,17 +64,22 @@ export class VerifyTools {
     const runner = new GithubRunner(loadRunnerConfig());
     if (resume) {
       ctx.logger.info('verify_patch', { mode: 'resume' });
-      return verifyByRunIds(runner, { runId: input.run_id, baselineRunId: input.baseline_run_id });
+      return { ...(await verifyByRunIds(runner, { runId: input.run_id, baselineRunId: input.baseline_run_id })), ...echoOf({}) };
     }
     const goal = input.goal ?? 'modernize_all';
     const { repo_url, stage, approval_token } = input as Required<Pick<Input, 'repo_url' | 'stage' | 'approval_token'>>;
     ctx.logger.info('verify_patch', { mode: 'dispatch', goal, stage });
+    let commit: string | undefined;
     const parsed = parseGithubRepo(repo_url); // throws a clear error for anything but a GitHub repository URL
-    return verifyByDispatch(runner, {
+    const result = await verifyByDispatch(runner, {
       repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
       note: parsed.ref ? `The runner clones the default branch of the repository, not "${parsed.ref}". Make sure they match before trusting the result.` : undefined,
       subfolder: input.subfolder,
-      getPatch: () => withRepo(repo_url, input.subfolder, ctx, (dir) => patchForStage(dir, { stage, token: approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }), { requireProjectRoot: true })
+      getPatch: () => withRepo(repo_url, input.subfolder, ctx, (dir, meta) => {
+        commit = meta.commit;
+        return patchForStage(dir, { stage, token: approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET });
+      }, { requireProjectRoot: true })
     });
+    return { ...result, ...echoOf(input, commit) };
   }
 }

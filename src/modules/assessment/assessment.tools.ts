@@ -3,6 +3,7 @@ import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { READS_PUBLIC_DATA } from '../../common/tool-annotations.js';
 import { assessDirectory, assessRepository } from './assess.js';
+import { echoOf } from './echo.js';
 import { withRepo } from './repo-source.js';
 
 export class AssessmentTools {
@@ -23,7 +24,11 @@ export class AssessmentTools {
   @Widget('score-dashboard')
   @UseGuards(scopeGuard('read'))
   async assessProject(input: { repo_url: string; subfolder?: string }, ctx: ExecutionContext) {
-    const assessment = await withRepo(input.repo_url, input.subfolder, ctx, (dir) => (input.subfolder ? assessDirectory(dir) : assessRepository(dir).then((f) => f.assessment)));
-    return { ...assessment, nextStep: 'Call plan_modernization with the same repo_url to get ordered stages, or generate_report for a PDF, SARIF and SBOM.' };
+    let commit: string | undefined;
+    const assessment = await withRepo(input.repo_url, input.subfolder, ctx, (dir, meta) => {
+      commit = meta.commit;
+      return input.subfolder ? assessDirectory(dir) : assessRepository(dir).then((f) => f.assessment);
+    });
+    return { ...assessment, ...echoOf(input, commit), nextStep: 'Call plan_modernization with the same repo_url to get ordered stages, or generate_report for a PDF, SARIF and SBOM.' };
   }
 }

@@ -3,6 +3,7 @@ import { Tool } from '../../common/validated-tool.js';
 import { scopeGuard } from '../../common/auth/scope.guard.js';
 import { READS_PUBLIC_DATA, RETURNS_PATCH_ONLY } from '../../common/tool-annotations.js';
 import { assessFull } from '../assessment/assess.js';
+import { echoOf } from '../assessment/echo.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
 import { applyStageInDir } from './apply.js';
@@ -61,9 +62,9 @@ export class PlanningTools {
   async planModernization(input: Input, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';
     ctx.logger.info('plan_modernization', { goal });
-    const { assessment, plan } = await withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
+    const { assessment, plan, commit } = await withRepo(input.repo_url, input.subfolder, ctx, async (dir, meta) => {
       const full = await assessFull(dir);
-      return { assessment: full.assessment, plan: buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal }) };
+      return { assessment: full.assessment, plan: buildPlan({ stack: full.assessment.stack, findings: full.findings, fixes: full.fixes, goal }), commit: meta.commit };
     }, { requireProjectRoot: true });
     const automated = plan.stages.find((s) => s.automated);
     return {
@@ -84,6 +85,7 @@ export class PlanningTools {
         rollback: s.rollback,
         scoreAfter: s.scoreAfter
       })),
+      ...echoOf(input, commit),
       hint: automated
         ? `Call preview_changes with stage set to an automated stage id, for example "${automated.id}", to see the exact file changes.`
         : 'No automated stage applies to this project. Follow the guided steps, then call assess_project to re-scan.'
@@ -116,13 +118,13 @@ export class PlanningTools {
   async previewChanges(input: Input & { stage: string }, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';
     ctx.logger.info('preview_changes', { goal, stage: input.stage });
-    return withRepo(input.repo_url, input.subfolder, ctx, async (dir) => {
+    return withRepo(input.repo_url, input.subfolder, ctx, async (dir, meta) => {
       const { assessment, findings, fixes, files } = await assessFull(dir);
       const plan = buildPlan({ stack: assessment.stack, findings, fixes, goal });
       const patches = generatePatches({ stack: assessment.stack, files, fixes, stageIds: [input.stage] });
       try {
         const preview = buildPreview({ plan, stageId: input.stage, patches, secret: process.env.METAMORPH_TOKEN_SECRET });
-        return { ...preview, nextStep: nextAfterPreview(preview) };
+        return { ...preview, ...echoOf(input, meta.commit), nextStep: nextAfterPreview(preview) };
       } catch (e) {
         if (!(e instanceof RangeError)) throw e;
         throw new Error(`${e.message} Call plan_modernization first (with the same goal, "${goal}") and pass one of its stage ids as "stage".`);
@@ -164,9 +166,12 @@ export class PlanningTools {
   async applyStage(input: Input & { stage: string; approval_token: string }, ctx: ExecutionContext) {
     const goal = input.goal ?? 'modernize_all';
     ctx.logger.info('apply_stage', { goal, stage: input.stage });
-    const applied = await withRepo(input.repo_url, input.subfolder, ctx, (dir) =>
-      applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET }),
+    let commit: string | undefined;
+    const applied = await withRepo(input.repo_url, input.subfolder, ctx, (dir, meta) => {
+      commit = meta.commit;
+      return applyStageInDir(dir, { stage: input.stage, token: input.approval_token, goal, secret: process.env.METAMORPH_TOKEN_SECRET });
+    },
     { requireProjectRoot: true });
-    return { ...applied, nextStep: 'Save the patch and apply it, then call verify_patch with the same repo_url, stage and approval_token to build and test it on a runner (or assess_project to re-scan).' };
+    return { ...applied, ...echoOf(input, commit), nextStep: 'Save the patch and apply it, then call verify_patch with the same repo_url, stage and approval_token to build and test it on a runner (or assess_project to re-scan).' };
   }
 }

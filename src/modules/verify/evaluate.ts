@@ -18,7 +18,8 @@ export interface RunView {
   patchApplied?: boolean;
   buildOk?: boolean;
   tests?: { ran: number; passed: number; failed: number };
-  checks?: Array<{ tool: string; status: 'pass' | 'fail' | 'error' | 'skipped' }>;
+  checks?: Array<{ tool: string; status: 'pass' | 'fail' | 'error' | 'skipped'; durationMs?: number }>;
+  php?: { selected?: string; supported: boolean; lockRegenerated?: boolean };
   checkCount?: number;
   findingsTotal?: number;
 }
@@ -32,7 +33,8 @@ export function viewOf(info: RunInfo, result?: RunnerResult, error?: string): Ru
     view.patchApplied = result.patchApplied;
     view.buildOk = result.buildOk;
     view.tests = { ...result.tests };
-    view.checks = sorted.slice(0, MAX_CHECK_ROWS).map((c) => ({ tool: c.tool, status: c.status }));
+    view.checks = sorted.slice(0, MAX_CHECK_ROWS).map((c) => ({ tool: c.tool, status: c.status, durationMs: c.durationMs }));
+    if (result.php) view.php = { ...(result.php.selected ? { selected: result.php.selected } : {}), supported: result.php.supported, ...(result.php.lockRegenerated !== undefined ? { lockRegenerated: result.php.lockRegenerated } : {}) };
     view.checkCount = result.checks.length;
     view.findingsTotal = result.findingsTotal ?? result.findings.length;
   }

@@ -3,6 +3,7 @@ import { Tool } from '../../common/validated-tool.js';
 import { requestKeyId, scopeGuard } from '../../common/auth/scope.guard.js';
 import { GENERATES_REPORT } from '../../common/tool-annotations.js';
 import { assessFull } from '../assessment/assess.js';
+import { echoOf } from '../assessment/echo.js';
 import { withRepo } from '../assessment/repo-source.js';
 import type { Goal } from '../assessment/types.js';
 import { parseGithubRepo } from '../../common/safe-archive.js';
@@ -75,7 +76,7 @@ export class ReportTools {
     ctx.logger.info('generate_report', { goal: input.goal ?? 'modernize_all' });
     const data = await collectReportData(input, ctx);
     const links = linkProvider({ secret: process.env.METAMORPH_TOKEN_SECRET, publicUrl: process.env.METAMORPH_PUBLIC_URL, routesActive: reportRoutesActive(), keyId });
-    return generateReport(data, links, undefined, keyId);
+    return { ...(await generateReport(data, links, undefined, keyId)), ...echoOf(input, data.meta.commitSha) };
   }
 }
 

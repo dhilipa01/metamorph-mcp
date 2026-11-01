@@ -21,6 +21,15 @@ const ORIGINS = ['measured', 'projected', 'unverified', 'reported'] as const;
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type Risk = 'low' | 'medium' | 'high';
 
+// What the server echoes back about the call that produced a result (see src/modules/assessment/echo.ts). Every field
+// is optional: older servers and resumed verifications do not send them. Never holds a secret.
+export interface EchoVM {
+  repoUrl?: string;
+  subfolder?: string;
+  commit?: string;
+  generatedAt?: string;
+}
+
 export interface FindingVM {
   id: string;
   severity: Severity;
@@ -83,8 +92,9 @@ export interface AssessmentVM {
   dependencyTotal?: number;
 }
 
-export interface PlanVM {
+export interface PlanVM extends EchoVM {
   kind: 'plan';
+  assessmentId?: string;
   stack: string;
   goal: string;
   scoreBefore?: number;
@@ -93,7 +103,7 @@ export interface PlanVM {
   hint?: string;
 }
 
-export interface ApplyVM {
+export interface ApplyVM extends EchoVM {
   kind: 'apply';
   stage: { id: string; index?: number; title: string; risk: Risk };
   mode: 'projected';
@@ -107,6 +117,11 @@ export interface ApplyVM {
   files: Array<{ path: string; action: 'create' | 'edit' | 'delete' }>;
   fileCount: number;
   note?: string;
+  // Numbers about the patch, never the patch itself.
+  patchSummary?: { bytes: number; lines: number; added: number; removed: number };
+  howToApply: string[];
+  howToApplyCount: number;
+  nextStep?: string;
 }
 
 export type ReportFormatId = 'pdf' | 'sarif' | 'sbom';
@@ -125,7 +140,7 @@ export interface ReportFileVM {
   uri?: string;
 }
 
-export interface ReportVM {
+export interface ReportVM extends EchoVM {
   kind: 'report';
   reportId: string;
   score: number;
@@ -144,13 +159,27 @@ export type CheckStatus = 'pass' | 'fail' | 'error' | 'skipped';
 
 export interface RunVM {
   status: RunStatus;
+  htmlUrl?: string;
   runId?: string;
   buildOk?: boolean;
   patchApplied?: boolean;
   tests?: { ran: number; passed: number; failed: number };
+  php?: { selected?: string; supported: boolean; lockRegenerated?: boolean };
 }
 
-export interface VerifyVM {
+export interface CheckVM {
+  tool: string;
+  status: CheckStatus;
+  durationMs?: number;
+}
+
+export interface MeasuredSideVM {
+  score: number;
+  distinct: number;
+  perTool: Array<{ tool: string; reported: number }>;
+}
+
+export interface VerifyVM extends EchoVM {
   kind: 'verify';
   status: RunStatus;
   verified: boolean;
@@ -159,10 +188,11 @@ export interface VerifyVM {
   stage?: string;
   patched: RunVM;
   baseline: RunVM;
-  checks: Array<{ tool: string; status: CheckStatus }>;
+  checks: CheckVM[];
   checkCount: number;
+  notes: string[];
   // Measured score (runner tools) of the baseline and patched runs, when both completed. Never read as verification.
-  measured?: { baseline: number; patched: number; delta: number; baselineFindings: number; patchedFindings: number; note?: string };
+  measured?: { baseline: number; patched: number; delta: number; baselineFindings: number; patchedFindings: number; baselineSide: MeasuredSideVM; patchedSide: MeasuredSideVM; note?: string };
   hint?: string;
 }
 
@@ -215,6 +245,41 @@ function oneOf<T extends string>(v: unknown, allowed: readonly T[], fallback: T)
   return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
 }
 
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+// http(s) only: never hand a javascript: or data: URL to an anchor.
+function safeHttpUrl(v: unknown): string | undefined {
+  if (typeof v !== 'string' || v.length > 2048) return undefined;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The server's `input` echo (and, for older shapes, top-level repo_url / commit). A URL with credentials or a query is
+// dropped: the widget only ever shows or re-sends a plain repository link.
+function echoOf(o: Record<string, unknown>): EchoVM {
+  const inp = isObj(o.input) ? o.input : {};
+  const rawUrl = str(inp.repo_url) ?? str(o.repo_url) ?? str(o.repoUrl);
+  let repoUrl: string | undefined;
+  const safe = safeHttpUrl(rawUrl);
+  if (safe && rawUrl) {
+    const u = new URL(safe);
+    if (!u.username && !u.password && !u.search && !u.hash) repoUrl = rawUrl;
+  }
+  const commit = str(o.commit) ?? str(o.sha);
+  const at = str(o.generatedAt);
+  const sub = str(inp.subfolder) ?? str(o.subfolder);
+  return {
+    ...(repoUrl ? { repoUrl } : {}),
+    ...(sub ? { subfolder: sub } : {}),
+    ...(commit && SHA_RE.test(commit) ? { commit } : {}),
+    ...(at && !Number.isNaN(new Date(at).getTime()) ? { generatedAt: at } : {})
+  };
+}
+
 function finding(raw: unknown): FindingVM | undefined {
   if (!isObj(raw)) return undefined;
   const title = str(raw.title);
@@ -260,6 +325,21 @@ function list<T>(raw: unknown, cap: number, map: (x: unknown, i: number) => T | 
   return out;
 }
 
+export const MAX_HOW = 8;
+
+// Counts from a unified diff. The patch text itself is never kept.
+export function patchStats(patch: string): { bytes: number; lines: number; added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  let lines = 0;
+  for (const l of patch.split('\n')) {
+    lines++;
+    if (l.startsWith('+') && !l.startsWith('+++')) added++;
+    else if (l.startsWith('-') && !l.startsWith('---')) removed++;
+  }
+  return { bytes: patch.length, lines, added, removed };
+}
+
 function toApply(o: Record<string, unknown>, before: number, after: number): ApplyVM {
   const st = isObj(o.stage) ? o.stage : {};
   const fixedAll = Array.isArray(o.findingsFixed) ? o.findingsFixed.length : 0;
@@ -278,8 +358,16 @@ function toApply(o: Record<string, unknown>, before: number, after: number): App
     if (!path) return undefined;
     return { path, action: oneOf(f.action, ['create', 'edit', 'delete'] as const, 'edit') };
   });
+  const patchText = typeof o.patch === 'string' ? o.patch : undefined;
+  const howAll = Array.isArray(o.howToApply) ? o.howToApply.length : 0;
+  const how = strList(o.howToApply, MAX_HOW);
   return {
     kind: 'apply',
+    ...echoOf(o),
+    ...(patchText !== undefined ? { patchSummary: patchStats(patchText) } : {}),
+    howToApply: how,
+    howToApplyCount: Math.max(howAll, how.length),
+    nextStep: str(o.nextStep),
     stage: { id: str(st.id) ?? 'stage', index: num(st.index), title: str(st.title) ?? str(st.id) ?? 'Stage', risk: oneOf(st.risk, RISKS, 'medium') },
     mode: 'projected',
     scoreBefore: before,
@@ -304,9 +392,11 @@ function run(raw: unknown): RunVM {
   return {
     status: oneOf(o.status, RUN_STATUSES, 'failed'),
     runId: str(o.runId),
+    ...(safeHttpUrl(o.htmlUrl) ? { htmlUrl: safeHttpUrl(o.htmlUrl) } : {}),
     buildOk: typeof o.buildOk === 'boolean' ? o.buildOk : undefined,
     patchApplied: typeof o.patchApplied === 'boolean' ? o.patchApplied : undefined,
-    tests: t ? { ran: count(t.ran), passed: count(t.passed), failed: count(t.failed) } : undefined
+    tests: t ? { ran: count(t.ran), passed: count(t.passed), failed: count(t.failed) } : undefined,
+    ...(isObj(o.php) ? { php: { selected: str(o.php.selected), supported: o.php.supported !== false, ...(typeof o.php.lockRegenerated === 'boolean' ? { lockRegenerated: o.php.lockRegenerated } : {}) } } : {})
   };
 }
 
@@ -320,11 +410,12 @@ function toVerify(o: Record<string, unknown>): VerifyVM {
   const checks = list(patched.checks, MAX_CHECKS, (c) => {
     if (!isObj(c)) return undefined;
     const tool = str(c.tool);
-    return tool ? { tool, status: oneOf(c.status, CHECK_STATUSES, 'error') } : undefined;
+    return tool ? { tool, status: oneOf(c.status, CHECK_STATUSES, 'error'), ...(num(c.durationMs) !== undefined ? { durationMs: Math.max(0, Math.round(num(c.durationMs)!)) } : {}) } : undefined;
   });
   const st = isObj(o.stage) ? o.stage : undefined;
   return {
     kind: 'verify',
+    ...echoOf(o),
     status: oneOf(o.status, RUN_STATUSES, 'failed'),
     verified: o.verified === true && reasonsAll === 0 && run(o.patched).status === 'completed',
     reasons,
@@ -334,6 +425,7 @@ function toVerify(o: Record<string, unknown>): VerifyVM {
     baseline: run(o.baseline),
     checks,
     checkCount: Math.max(checksAll, checks.length, count(patched.checkCount)),
+    notes: strList(o.notes, MAX_NOTES),
     measured: measuredOf(o.measured),
     hint: str(o.hint)
   };
@@ -344,7 +436,16 @@ function measuredOf(raw: unknown): VerifyVM['measured'] {
   const b = pct(raw.baseline.score);
   const p = pct(raw.patched.score);
   if (b === undefined || p === undefined) return undefined;
-  return { baseline: b, patched: p, delta: p - b, baselineFindings: count(raw.baseline.distinct), patchedFindings: count(raw.patched.distinct), note: str(raw.note) };
+  const side = (x: Record<string, unknown>, score: number): MeasuredSideVM => ({
+    score,
+    distinct: count(x.distinct),
+    perTool: list(x.perTool, MAX_CHECKS, (t) => {
+      if (!isObj(t)) return undefined;
+      const tool = str(t.tool);
+      return tool ? { tool, reported: count(t.reported) } : undefined;
+    })
+  });
+  return { baseline: b, patched: p, delta: p - b, baselineFindings: count(raw.baseline.distinct), patchedFindings: count(raw.patched.distinct), baselineSide: side(raw.baseline, b), patchedSide: side(raw.patched, p), note: str(raw.note) };
 }
 
 function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>): AssessmentVM {
@@ -377,10 +478,7 @@ function toAssessment(o: Record<string, unknown>, score: Record<string, unknown>
     truncated: o.truncated === true,
     origin: oneOf(isObj(o.score) ? o.score.origin : undefined, ORIGINS, 'measured'),
     assessmentId: str(o.assessmentId),
-    repoUrl: str(o.repo_url) ?? str(o.repoUrl),
-    subfolder: str(o.subfolder),
-    commit: str(o.commit) ?? str(o.sha),
-    generatedAt: str(o.generatedAt),
+    ...echoOf(o),
     projects: list(o.projects, MAX_PROJECTS, (p) => {
       if (!isObj(p)) return undefined;
       const path = str(p.path);
@@ -400,17 +498,6 @@ export function formatBytes(n: number): string {
 const FORMATS_ID: readonly ReportFormatId[] = ['pdf', 'sarif', 'sbom'];
 const MIME_BY_FORMAT: Record<ReportFormatId, string> = { pdf: 'application/pdf', sarif: 'application/sarif+json', sbom: 'application/vnd.cyclonedx+json' };
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-
-// http(s) only: never hand a javascript: or data: URL to an anchor.
-function safeHttpUrl(v: unknown): string | undefined {
-  if (typeof v !== 'string' || v.length > 2048) return undefined;
-  try {
-    const u = new URL(v);
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function inlineOf(raw: unknown, format: ReportFormatId): ReportFileVM['inline'] {
   if (!isObj(raw) || typeof raw.data !== 'string') return undefined;
@@ -451,6 +538,7 @@ function toReport(o: Record<string, unknown>, score: Record<string, unknown>): R
   });
   return {
     kind: 'report',
+    ...echoOf(o),
     reportId: (str(o.reportId) ?? '').slice(0, 24),
     score: pct(score.overall) ?? 0,
     origin: str(score.origin) ?? 'measured',
@@ -476,6 +564,8 @@ function classify(o: Record<string, unknown>): ViewModel | undefined {
   if (Array.isArray(o.stages)) {
     return {
       kind: 'plan',
+      ...echoOf(o),
+      assessmentId: str(o.assessmentId),
       stack: str(o.stack) ?? 'unknown',
       goal: str(o.goal) ?? 'modernize_all',
       scoreBefore: pct(o.scoreBefore),
