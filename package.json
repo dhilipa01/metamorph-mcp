@@ -43,6 +43,7 @@
   },
   "author": "Dhilipan Sankar",
   "license": "MIT",
+  "homepage": "https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai",
   "nitrostack": {
     "skillsVersion": "1.0.0"
   }

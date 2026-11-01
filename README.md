@@ -10,7 +10,9 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178c6)
 ![tools](https://img.shields.io/badge/tools-9-success)
 
-[Dashboard](https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app) · [Docs](docs/) · [Evidence](docs/EVIDENCE.md)
+**Live:** [Landing page](https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai) · [Dashboard, no key needed](https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/app) · MCP endpoint `https://metamorph-6ae4a33e-dhilipan-sankar-fronthyre.app.nitrocloud.ai/mcp`
+
+[Docs](docs/) · [Evidence](docs/EVIDENCE.md)
 
 </div>
 
