@@ -27,7 +27,7 @@
     "@modelcontextprotocol/ext-apps": "^1.0.0",
     "@nitrostack/core": "^1.1.2",
     "dotenv": "^16.3.1",
-    "pdfmake": "0.3.13",
+    "pdfmake": "0.3.14",
     "zod": "^3.25.0"
   },
   "devDependencies": {
